@@ -1,0 +1,39 @@
+# Decisions log
+
+Each entry is **LOCKED** (Shrey approved) or **HYPOTHESIS** (proposed, not approved). **DEFERRED** means parked by Shrey and out of scope until reopened.
+A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shrey's explicit approval and a new entry.
+
+| ID | Decision | Status | Source / phase | Notes |
+|---|---|---|---|---|
+| D-001 | Business: single counter outlet, momos + Chinese fast food, India | LOCKED | Brief | |
+| D-002 | Receipts print on a thermal printer over Bluetooth | LOCKED | Brief | |
+| D-003 | Payments: cash + UPI (card optional) | LOCKED | Brief | Narrowed by D-203 |
+| D-004 | Bills must be GST-compliant | DEFERRED | Brief; parked by Shrey 22 Oct 2026 | Replaced for now by D-201. Research kept in 01-research §3 |
+| D-005 | Billing must keep working with no internet | LOCKED | Brief | |
+| D-006 | Typical order in under ~5 taps | LOCKED | Brief | |
+| D-007 | Insights are a core feature | LOCKED | Brief | |
+| D-008 | Work in 3 phases with approval gates; docs in `/docs`; no app code yet | LOCKED | Brief | |
+| D-009 | Project lives in its own private repo `shreyc74-hub/counter-pos`, not `careerdestiny-web` | LOCKED | Shrey, 22 Oct 2026 | Repo still to be created by Shrey |
+| D-201 | GST / tax-compliant billing is **out of scope for now**. Bills are plain receipts with no tax lines | LOCKED | Shrey, 22 Oct 2026 | Revisit before going live if registered. See risk R-1 |
+| D-202 | The client is an **Android app** | LOCKED | Shrey, 22 Oct 2026 | Framework (Kotlin / Flutter / RN / Capacitor) chosen in Phase 2 |
+| D-203 | Payment is **marked manually in the app** as Cash or UPI per order. No payment gateway, no auto-confirmation | LOCKED | Shrey, 22 Oct 2026 | Supersedes D-109 |
+| D-204 | First printer to support: Shrey's **Posiflow battery-operated Bluetooth thermal printer** | LOCKED | Shrey, 22 Oct 2026 | Exact model, paper width and BT mode TBC (Q-P1) |
+| D-206 | For now, design assumes the printer is **always on** (no sleep / battery handling in V1 scope). Basic connect-retry and the print queue stay | LOCKED | Shrey, 22 Oct 2026 | Sleep/battery handling deferred; revisit after milestone 1 on the real printer |
+| D-101 | Counter device is an Android **tablet (8–10", Android 12+)**, not a phone | HYPOTHESIS | Phase 1 §2.2, §7 | D-202 locks Android; device form factor still open |
+| D-102 | Printer: mains-powered, dual-mode, USB fallback | REPLACED | Phase 1 §2.1 | Superseded by D-204 |
+| D-103 | Printing uses native Android Bluetooth (SPP); pure PWA rejected | HYPOTHESIS | Phase 1 §2.2 | Largely implied by D-202; confirm once printer mode is known |
+| D-104 | Tax mode as a dated setting on every bill | DEFERRED | Phase 1 §3.1 | With D-004 |
+| D-105 | Legal invoice number per-device series, ≤16 chars, FY reset | DEFERRED | Phase 1 §3.3 | Still proposing simple per-device sequential **bill numbers** + UUID (D-205) |
+| D-205 | Each bill gets a human bill number from a per-device sequence (e.g. `T1-00123`) plus an internal UUID | HYPOTHESIS | Revision 1 | Keeps the door open to GST numbering later |
+| D-106 | Bills are immutable: void/refund with reason + staff + time; never hard-deleted | HYPOTHESIS | Phase 1 §6 | Now justified by leakage detection, not GST |
+| D-107 | Every order carries `channel` + `external_order_id` | HYPOTHESIS | Phase 1 §5 | Tax-treatment field deferred with D-004 |
+| D-108 | Aggregator orders: V1 manual quick-entry; V2 report import; middleware Later | HYPOTHESIS | Phase 1 §5 | |
+| D-109 | UPI amount-prefilled QR + gateway in V2 | REPLACED | Phase 1 §4.3 | Superseded by D-203. Optional on-screen amount QR still possible later |
+| D-110 | Bill is saved locally before printing; printing is a queued, retryable side effect | HYPOTHESIS | Phase 1 §2.5 | More important with a battery printer |
+| D-111 | Menu supports variants, modifiers, fixed combos from V1 | HYPOTHESIS | Phase 1 §6 | |
+| D-112 | UUIDs + `outlet_id` everywhere to keep multi-outlet open | HYPOTHESIS | Phase 1 §8 | |
+| D-113 | Feature tiering (V1 / V2 / Later) as in Phase 1 §6, minus GST items | HYPOTHESIS | Phase 1 §6 | |
+| D-114 | Print a bill for every order (no Rule 46 consolidated invoice) | DEFERRED | Phase 1 §3.2 | With D-004 |
+| D-115 | Volume ~100–300 bills/day | HYPOTHESIS | Brief | |
+| D-116 | Users: Shrey + 1–2 staff; roles = owner, cashier | HYPOTHESIS | Brief | |
+| D-117 | Historical sales from the current POS will be imported | HYPOTHESIS | Brief | Needs sample file |
