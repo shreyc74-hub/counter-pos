@@ -29,6 +29,8 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | D-216 | V1 captures the data later insights need from day one: cost per item/variant, staff on every action, exact timestamps, void/discount reasons, order channel, optional wastage at close | HYPOTHESIS | 00-vision | Depends on Shrey being willing to enter costs and wastage (Q18) |
 | D-213 | Admin panel (menu, dashboard, expenses, insights, staff) remains a web app long-term; Android is the counter only | HYPOTHESIS | Revision 2 | |
 | D-214 | Menu: placeholder in `docs/menu.md` until Shrey shares the real one | LOCKED | Shrey, 22 Oct 2026 | |
+| D-217 | Wastage entry is **optional**: a 30-second "leftovers" step in day close (stepper per batch-cooked item, can be skipped). Prep forecasts are built from **sales data alone**; wastage only measures the savings | HYPOTHESIS | Shrey Q, 22 Oct 2026 | Shrey prefers "use the app and let the data build up" |
+| D-218 | Marking an item **sold out** in the counter screen is logged with a timestamp, so forecasts know demand was cut short | HYPOTHESIS | 22 Oct 2026 | |
 | D-101 | Counter device is an Android **tablet (8–10", Android 12+)**, not a phone | HYPOTHESIS | Phase 1 §2.2, §7 | D-202 locks Android; device form factor still open |
 | D-102 | Printer: mains-powered, dual-mode, USB fallback | REPLACED | Phase 1 §2.1 | Superseded by D-204 |
 | D-103 | Printing uses native Android Bluetooth (SPP); pure PWA rejected | HYPOTHESIS | Phase 1 §2.2 | Largely implied by D-202; confirm once printer mode is known |

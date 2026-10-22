@@ -26,6 +26,12 @@ Insights are only as good as the data captured from day one. This table makes su
 | **Channel profit** (Swiggy/Zomato vs counter) | "After commission, Zomato orders earn 22% less per plate" | Order channel; aggregator commission % | V1 (channel split) · V2 (net margin) |
 | **Pricing** | "Price change on Veg Fried didn't reduce volume" | Price history per item | V2 |
 
+## Wastage: how it's captured (no extra work required)
+
+- **Forecasts come from sales alone.** Using the app normally is enough: every order records what sold and when, so after 4–8 weeks the app can say "prepare about 35 veg steamed for 6–8pm on Fridays".
+- **Sold out = one tap.** If an item runs out, staff mark it sold out (it's greyed out on the counter screen anyway). That tells the forecast "demand was higher than this".
+- **Leftovers at close (optional, about 30 seconds).** The day-close screen lists only batch-cooked items (momos) with a +/- counter for plates left over, and a **Skip** button. If you fill it in, the app can show money saved by better prep. If you skip it, nothing breaks.
+
 ## How insights are delivered
 
 - **Live dashboard** (admin panel): today's sales, money in vs out, cash expected in the drawer, top items.
