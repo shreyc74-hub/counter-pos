@@ -6,6 +6,7 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | ID | Decision | Status | Source / phase | Notes |
 |---|---|---|---|---|
 | D-001 | Business: single counter outlet, momos + Chinese fast food, India | LOCKED | Brief | |
+| D-010 | Phase 1 treated as approved; Phase 2 written on Shrey's request | LOCKED | Shrey, 22 Oct 2026 | |
 | D-002 | Receipts print on a thermal printer over Bluetooth | LOCKED | Brief | |
 | D-003 | Payments: cash + UPI (card optional) | LOCKED | Brief | Narrowed by D-203 |
 | D-004 | Bills must be GST-compliant | DEFERRED | Brief; parked by Shrey 22 Oct 2026 | Replaced for now by D-201. Research kept in 01-research §3 |
@@ -49,3 +50,17 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | D-115 | Volume ~100–300 bills/day | HYPOTHESIS | Brief | |
 | D-116 | Users: Shrey + 1–2 staff; roles = owner, cashier | HYPOTHESIS | Brief | |
 | D-117 | Historical sales from the current POS will be imported | HYPOTHESIS | Brief | Needs sample file |
+| D-219 | Admin panel lets Shrey manage menu, variants, add-ons, combos, **prices and costs** | LOCKED | Shrey, 22 Oct 2026 | |
+| D-220 | Build and test on **dummy data**: a separate demo outlet with seeded realistic orders, kept apart from the real outlet | LOCKED | Shrey, 22 Oct 2026 | 02-architecture §4 |
+| D-301 | Backend: **Supabase** (Postgres + auth + realtime + scheduled jobs + edge functions); business rules in Postgres functions | HYPOTHESIS | 02-architecture §3.3 | |
+| D-302 | Website: **Next.js + TypeScript**, `/counter` and `/admin` in one app | HYPOTHESIS | §3.1 | |
+| D-303 | Android: **React Native (Expo dev build)** + shared TypeScript package; own BT printing module, Kotlin fallback | HYPOTHESIS | §3.2 | Expensive to reverse; open Q1 |
+| D-304 | Offline sync: own **outbox + idempotent RPC**; bills device→cloud, menu cloud→device | HYPOTHESIS | §3.4 | |
+| D-305 | Financial records append-only, enforced in the DB; prices and costs effective-dated; `events` audit log | HYPOTHESIS | §3.5 | |
+| D-306 | Analytics in Postgres views/materialised views; no separate warehouse | HYPOTHESIS | §3.6 | |
+| D-307 | Insights: SQL facts → LLM narration with fact IDs → number checker → template fallback | HYPOTHESIS | §3.7 | |
+| D-308 | Delivery: admin dashboard + Telegram daily summary in V1; WhatsApp V2 | HYPOTHESIS | §3.8 | Open Q3 |
+| D-309 | Auth: owner via Supabase Auth; staff via PIN per device; roles owner/cashier; RLS by outlet | HYPOTHESIS | §3.9 | |
+| D-310 | Backups: Supabase backups (Pro) + own nightly export | HYPOTHESIS | §3.10 | |
+| D-311 | Observability: Sentry + `print_jobs` + `app_errors` | HYPOTHESIS | §3.11 | |
+| D-312 | Live running cost target ≈ ₹2,000–4,000/month (testing ≈ ₹0) | HYPOTHESIS | §6 | Open Q2 |
