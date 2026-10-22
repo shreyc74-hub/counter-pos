@@ -45,6 +45,30 @@ Fine if you're unregistered and under the threshold. If you are GST-registered, 
 
 ---
 
+## Revision 2 (22 Oct 2026): build order and Shrey's answers
+
+| Input from Shrey | Effect |
+|---|---|
+| **Website first** (counter screen + admin panel) for testing, then the Android app (D-207) | Phase 2 now designs a shared backend + web app first, with the Android counter app as a second client on the same backend and data model |
+| **No printing in the website phase** (D-208) | The receipt is shown on screen. The "prove printing first" milestone moves to the start of the Android phase |
+| **Website is online-only** (D-209) | Simpler web build. Offline billing (D-005) becomes an Android-phase requirement. IDs and bill numbers are still made on the device (D-210) so nothing has to be redesigned |
+| **Q5 pains:** inconsistent data; no real-time tracking or insights on money in and out (D-212) | Two V1 priorities move up: (1) **money out**: expenses, supplier payments, cash taken out, with category and payment mode; (2) **live money dashboard**: today's in (cash / UPI) vs out, cash expected in the drawer. "Inconsistent data" argues for one source of truth, bills that can't be edited or deleted (only voided), and validation at entry |
+| **Q7: no KOT** (D-211) | KOT removed from V1 |
+| **Q8: menu placeholder** (D-214) | See `docs/menu.md` |
+| **Printer: Posiflow**, model/width later (D-204) | No change for now |
+
+### Risk R-2: printer compatibility is only tested late
+With printing moved to the Android phase, we won't know until then whether the Posiflow speaks standard ESC/POS over Bluetooth Classic or BLE. **Cheap mitigation (no code, ~10 minutes):** pair the printer with an Android phone and print a test page from a free generic app like RawBT. If that works, the printer will very likely work with our app. Optional, but it removes the biggest unknown early.
+
+### Feature tiering changes (to §6)
+- **KOT:** removed.
+- **Expenses / cash out** (category, amount, cash or UPI, note, who): **V1, core**.
+- **Live money dashboard** (in vs out, by cash and UPI, expected drawer cash): **V1, core**.
+- **GST items:** deferred (Revision 1).
+- **Payment gateway / reconciliation:** removed (Revision 1).
+
+---
+
 ## TL;DR: the 8 things that matter most
 
 1. **Printing settles the client stack.** Most cheap Indian 58mm Bluetooth printers are Bluetooth Classic (SPP), and some are dual-mode (SPP + BLE). A PWA can only talk BLE through Web Bluetooth, which doesn't exist on iOS at all. So **a native (or natively wrapped) Android app is the safe choice**, and the first milestone must prove printing on *the actual printer you buy*. 💸
