@@ -121,17 +121,20 @@ export function ReceiptPreview({ lines, width }: { lines: ReceiptLine[]; width: 
       {lines.map((l, i) => {
         const text = renderText([l], width);
         if (l.kind === "text") {
+          const cls = [l.big ? "big" : l.bold ? "bold" : "", l.tall ? "tall" : ""].filter(Boolean).join(" ") || undefined;
           if (l.boldChars && !l.bold && !l.big && (l.align ?? "left") === "left") {
             return (
-              <div key={i}>
-                <strong>{text.slice(0, l.boldChars)}</strong>
-                {text.slice(l.boldChars)}
+              <div key={i} className={cls}>
+                <span>
+                  <strong>{text.slice(0, l.boldChars)}</strong>
+                  {text.slice(l.boldChars)}
+                </span>
               </div>
             );
           }
           return (
-            <div key={i} className={l.big ? "big" : l.bold ? "bold" : undefined}>
-              {text || " "}
+            <div key={i} className={cls}>
+              {l.tall ? <span>{text || " "}</span> : text || " "}
             </div>
           );
         }

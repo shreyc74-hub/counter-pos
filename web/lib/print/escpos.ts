@@ -36,7 +36,7 @@ export function encodeReceipt(lines: ReceiptLine[], opts: EncodeOptions = {}, wi
     }
     push(ESC, 0x61, l.align === "center" ? 0x01 : l.align === "right" ? 0x02 : 0x00);
     push(ESC, 0x45, l.bold ? 0x01 : 0x00);
-    push(GS, 0x21, l.big ? 0x11 : 0x00); // double width + double height
+    push(GS, 0x21, l.big ? 0x11 : l.tall ? 0x01 : 0x00); // big: double width + height; tall: double height only
     if (l.boldChars && !l.bold) {
       push(ESC, 0x45, 0x01);
       text(l.text.slice(0, l.boldChars));
@@ -46,7 +46,7 @@ export function encodeReceipt(lines: ReceiptLine[], opts: EncodeOptions = {}, wi
       text(l.text);
     }
     push(LF);
-    if (l.big) push(GS, 0x21, 0x00);
+    if (l.big || l.tall) push(GS, 0x21, 0x00);
     if (l.bold) push(ESC, 0x45, 0x00);
   }
   push(ESC, 0x61, 0x00);

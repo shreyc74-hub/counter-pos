@@ -178,6 +178,9 @@ h1, h2, h3 { margin: 0; }
 }
 .receipt .big { font-size: 26px; line-height: 1.25; font-weight: 800; } /* double width, like the printer */
 .receipt .bold { font-weight: 800; }
+/* double height, normal width: stretched vertically like the printer does */
+.receipt .tall { height: 2.9em; }
+.receipt .tall > span { display: inline-block; transform: scaleY(2); transform-origin: top left; }
 
 /* ---------- lists / tables ---------- */
 .list-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #efebe3; align-items: center; }

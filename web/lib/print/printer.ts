@@ -139,8 +139,10 @@ export class PrinterService {
     const textLines: string[] = [];
     const bigLines: number[] = [];
     const boldLines: Record<number, number> = {};
+    const tallLines: number[] = [];
     lines.forEach((l) => {
       if (l.kind === "text" && l.big) bigLines.push(textLines.length);
+      if (l.kind === "text" && l.tall) tallLines.push(textLines.length);
       if (l.kind === "text" && (l.bold || l.boldChars)) boldLines[textLines.length] = l.bold ? -1 : (l.boldChars ?? -1);
       textLines.push(renderText([l], width));
     });
@@ -149,6 +151,7 @@ export class PrinterService {
       text: textLines.join("\n"),
       bigLines,
       boldLines,
+      tallLines,
       widthChars: width,
     };
   }

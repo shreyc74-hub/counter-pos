@@ -87,7 +87,7 @@ describe("ESC/POS encoding", () => {
   it("prints item names bold, but not their qty and amount", () => {
     const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32 });
     const item = lines.find((l) => l.kind === "text" && l.text.startsWith("Veg Momos"));
-    expect(item).toMatchObject({ boldChars: 19 });
+    expect(item).toMatchObject({ boldChars: 19, tall: true });
     const bytes = Buffer.from(encodeReceipt(lines, {}, 32));
     const on = Buffer.from([0x1b, 0x45, 0x01]);
     const off = Buffer.from([0x1b, 0x45, 0x00]);
@@ -96,6 +96,9 @@ describe("ESC/POS encoding", () => {
     expect(bytes.lastIndexOf(on, start)).toBe(start - 3);
     const offAt = bytes.indexOf(off, start);
     expect(bytes.subarray(start, offAt).toString("latin1")).toBe("Veg Momos Steamed  ");
+    // double height (GS ! 0x01) just before the line, back to normal size after it
+    expect(bytes.lastIndexOf(Buffer.from([0x1d, 0x21, 0x01]), start)).toBeGreaterThan(-1);
+    expect(bytes.indexOf(Buffer.from([0x1d, 0x21, 0x00]), start)).toBeGreaterThan(start);
   });
 
   it("adds a cut only when asked", () => {

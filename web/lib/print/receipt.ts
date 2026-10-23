@@ -13,6 +13,8 @@ export type ReceiptLine =
       align?: "left" | "center" | "right";
       bold?: boolean;
       big?: boolean;
+      /** Double height, normal width: easier to read, still fits the line. */
+      tall?: boolean;
       /** Print only the first N characters bold (e.g. the item name, not its qty and amount). */
       boldChars?: number;
     }
@@ -108,9 +110,9 @@ export function layoutReceipt(order: Order, outlet: Outlet, opts: ReceiptOptions
   t(row("Item", "Qty", "Amt", nameW, qtyW, amtW));
   for (const l of order.lines) {
     const nameLines = wrap(l.name, nameW);
-    // Item names are bold so they stand out; qty and amount stay regular.
-    t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW), { boldChars: nameW });
-    for (const extra of nameLines.slice(1)) t(extra, { bold: true });
+    // Item lines are double height for readability; the name is bold, qty and amount regular.
+    t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW), { boldChars: nameW, tall: true });
+    for (const extra of nameLines.slice(1)) t(extra, { bold: true, tall: true });
     for (const m of l.modifiers) {
       const label = `  + ${m.name}`;
       t(m.pricePaise ? twoCol(label, formatAmount(m.pricePaise * l.qty), W) : toPrintable(label));
