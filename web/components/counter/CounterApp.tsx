@@ -1,0 +1,340 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createStore } from "@/lib/data";
+import type { Bootstrap } from "@/lib/data/store";
+import { computeDayTotals } from "@/lib/domain/billing";
+import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
+import { formatRupees } from "@/lib/domain/money";
+import type { CashMovement, DaySession, Expense, Order, Payment, Staff } from "@/lib/domain/types";
+import { layoutDayReport, layoutReceipt } from "@/lib/print/receipt";
+import { uuid } from "@/lib/uuid";
+import { CloseDayScreen, OpenDayScreen } from "./DayScreens";
+import { ExpenseScreen } from "./ExpenseScreen";
+import { LockScreen } from "./LockScreen";
+import { type OrderDraft, OrderScreen } from "./OrderScreen";
+import { OrdersToday } from "./OrdersToday";
+import { PrinterScreen } from "./PrinterScreen";
+import { ReceiptSheet } from "./ReceiptSheet";
+import { Sheet, Toast, errorText, usePrinter } from "./ui";
+
+type View = "order" | "orders" | "expense" | "day" | "printer";
+
+const IDLE_LOCK_MS = 5 * 60 * 1000;
+
+export function CounterApp() {
+  const store = useMemo(() => createStore(), []);
+  const svc = usePrinter();
+  const [boot, setBoot] = useState<Bootstrap | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [staff, setStaff] = useState<Staff | null>(null);
+  const [day, setDay] = useState<DaySession | null>(null);
+  const [dayLoaded, setDayLoaded] = useState(false);
+  const [view, setView] = useState<View>("order");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [movements, setMovements] = useState<CashMovement[]>([]);
+  const [soldOut, setSoldOut] = useState<Set<string>>(new Set());
+  const [receipt, setReceipt] = useState<{ order: Order; jobId: string | null } | null>(null);
+  const [failedSave, setFailedSave] = useState<{ order: Order; error: string } | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  // Remounting the order screen empties its cart (used after a retried save succeeds).
+  const [cartKey, setCartKey] = useState(0);
+  const clearToast = useCallback(() => setToast(null), []);
+
+  useEffect(() => {
+    store
+      .load()
+      .then((b) => {
+        setBoot(b);
+        setSoldOut(new Set(b.soldOut));
+      })
+      .catch((e) => setBootError(errorText(e)));
+  }, [store]);
+
+  const refreshDay = useCallback(async () => {
+    const d = await store.currentDay();
+    setDay(d);
+    setDayLoaded(true);
+    if (d) {
+      const [o, e, m] = await Promise.all([store.listOrders(d.id), store.listExpenses(d.id), store.listCashMovements(d.id)]);
+      setOrders(o);
+      setExpenses(e);
+      setMovements(m);
+    } else {
+      setOrders([]);
+      setExpenses([]);
+      setMovements([]);
+    }
+  }, [store]);
+
+  const lock = useCallback(() => {
+    void store.logout();
+    setStaff(null);
+    setView("order");
+  }, [store]);
+
+  // Lock the counter after a few idle minutes so bills are never saved under the wrong name.
+  const lastActivity = useRef(Date.now());
+  useEffect(() => {
+    if (!staff) return;
+    const bump = () => (lastActivity.current = Date.now());
+    window.addEventListener("pointerdown", bump);
+    window.addEventListener("keydown", bump);
+    const t = setInterval(() => {
+      if (Date.now() - lastActivity.current > IDLE_LOCK_MS && !receipt) lock();
+    }, 15_000);
+    return () => {
+      window.removeEventListener("pointerdown", bump);
+      window.removeEventListener("keydown", bump);
+      clearInterval(t);
+    };
+  }, [staff, lock, receipt]);
+
+  const totals = useMemo(() => (day ? computeDayTotals(day, orders, expenses, movements) : null), [day, orders, expenses, movements]);
+  const nextToken = useMemo(() => (orders.length ? Math.max(...orders.map((o) => o.token)) + 1 : 1), [orders]);
+
+  if (bootError) {
+    return (
+      <main className="page">
+        <div className="error">Could not start: {bootError}</div>
+      </main>
+    );
+  }
+  if (!boot) return <main className="page muted">Loading…</main>;
+
+  if (!staff) {
+    return (
+      <LockScreen
+        boot={boot}
+        demo={store.kind === "demo"}
+        onLogin={async (pin) => {
+          const s = await store.login(pin);
+          if (s) {
+            lastActivity.current = Date.now();
+            setStaff(s);
+            await refreshDay();
+          }
+          return s;
+        }}
+      />
+    );
+  }
+
+  if (!dayLoaded) return <main className="page muted">Loading…</main>;
+
+  if (!day) {
+    return (
+      <>
+        <OpenDayScreen
+          staff={staff}
+          onLock={lock}
+          onOpen={async (floatPaise) => {
+            await store.openDay(floatPaise);
+            await refreshDay();
+            setView("order");
+          }}
+        />
+        <Toast message={toast} onDone={clearToast} />
+      </>
+    );
+  }
+
+  const printOrder = (order: Order, duplicate = false) =>
+    svc.enqueue(
+      `${duplicate ? "Reprint" : "Bill"} ${order.billNo}`,
+      layoutReceipt(order, boot.outlet, { width: svc.getSettings().width, duplicate }),
+    );
+
+  const saveOrder = async (order: Order, isRetry = false): Promise<boolean> => {
+    try {
+      await store.submitOrder(order);
+    } catch (e) {
+      setFailedSave({ order, error: errorText(e) });
+      return false;
+    }
+    setFailedSave(null);
+    if (isRetry) setCartKey((k) => k + 1);
+    setOrders((os) => [order, ...os.filter((o) => o.id !== order.id)]);
+    const jobId = svc.getSettings().autoPrint ? printOrder(order) : null;
+    setReceipt({ order, jobId });
+    return true;
+  };
+
+  const submit = async (draft: OrderDraft, payments: Payment[]): Promise<boolean> => {
+    const { billNo, token } = await store.nextBillNumber();
+    const subtotal = subtotalPaise(draft.lines);
+    const order: Order = {
+      id: uuid(),
+      billNo,
+      token,
+      deviceCode: boot.device.code,
+      staffId: staff.id,
+      staffName: staff.name,
+      daySessionId: day.id,
+      channel: draft.channel,
+      externalOrderId: draft.externalOrderId,
+      note: draft.note,
+      lines: draft.lines,
+      subtotalPaise: subtotal,
+      discount: draft.discount,
+      totalPaise: totalPaise(draft.lines, draft.discount?.amountPaise ?? 0),
+      payments,
+      createdAt: new Date().toISOString(),
+      menuVersion: boot.menu.version,
+      voided: null,
+    };
+    return saveOrder(order);
+  };
+
+  const nav: [View, string][] = [
+    ["order", "New order"],
+    ["orders", `Orders today (${orders.filter((o) => !o.voided).length})`],
+    ["expense", "Expense / cash"],
+    ["day", "Close day"],
+    ["printer", svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed") ? "Printer: failed" : "Printer"],
+  ];
+
+  return (
+    <div className="screen">
+      <header className="topbar">
+        <div className="row">
+          {boot.outlet.isDemo ? <span className="badge-demo">DEMO</span> : null}
+          <strong>{boot.outlet.name}</strong>
+          <span className="muted small">
+            Device {boot.device.code} · Day {day.businessDate}
+          </span>
+        </div>
+        {totals ? (
+          <div className="row small muted" style={{ flexWrap: "wrap" }}>
+            <span>Sales {formatRupees(totals.salesPaise)}</span>
+            <span>Cash {formatRupees(totals.cashSalesPaise)}</span>
+            <span>UPI {formatRupees(totals.upiSalesPaise)}</span>
+            <span>Drawer {formatRupees(totals.expectedCashPaise)}</span>
+          </div>
+        ) : null}
+      </header>
+
+      {view === "order" ? (
+        <OrderScreen
+          key={cartKey}
+          menu={boot.menu}
+          outlet={boot.outlet}
+          staff={staff}
+          soldOut={soldOut}
+          nextToken={nextToken}
+          verifyOwnerPin={(pin) => store.verifyOwnerPin(pin)}
+          notify={setToast}
+          onToggleSoldOut={async (id, out) => {
+            setSoldOut((s) => {
+              const n = new Set(s);
+              if (out) n.add(id);
+              else n.delete(id);
+              return n;
+            });
+            try {
+              await store.setSoldOut(id, out);
+              setToast(out ? "Marked sold out" : "Back in stock");
+            } catch (e) {
+              setToast(errorText(e));
+            }
+          }}
+          onSubmit={submit}
+        />
+      ) : null}
+      {view === "orders" ? (
+        <OrdersToday
+          orders={orders}
+          outlet={boot.outlet}
+          staff={staff}
+          onReprint={(o) => {
+            printOrder(o, true);
+            setToast(`Reprinting ${o.billNo}`);
+          }}
+          onVoid={async (id, reason, pin) => {
+            await store.voidOrder(id, reason, pin);
+            setOrders(await store.listOrders(day.id));
+            setToast("Bill voided");
+          }}
+        />
+      ) : null}
+      {view === "expense" && totals ? (
+        <ExpenseScreen
+          totals={totals}
+          expenses={expenses}
+          movements={movements}
+          notify={setToast}
+          onAddExpense={async (e) => {
+            const row = await store.addExpense(e);
+            setExpenses((xs) => [...xs, row]);
+          }}
+          onAddMovement={async (m) => {
+            const row = await store.addCashMovement(m);
+            setMovements((xs) => [...xs, row]);
+          }}
+        />
+      ) : null}
+      {view === "day" && totals ? (
+        <CloseDayScreen
+          day={day}
+          totals={totals}
+          menu={boot.menu}
+          onPrintReport={() => {
+            if (svc.getSettings().mode === "none") return setToast("Set up a printer first.");
+            svc.enqueue("Day report", layoutDayReport(day, totals, boot.outlet, { width: svc.getSettings().width }));
+          }}
+          onClose={async (counted, leftovers) => {
+            const closed = await store.closeDay({ countedCashPaise: counted, leftovers });
+            if (svc.getSettings().mode !== "none") {
+              svc.enqueue("Day report", layoutDayReport(closed, totals, boot.outlet, { width: svc.getSettings().width }));
+            }
+            const v = closed.variancePaise ?? 0;
+            setToast(`Day closed. ${v === 0 ? "Cash matches." : v < 0 ? `${formatRupees(-v)} short.` : `${formatRupees(v)} extra.`}`);
+            await refreshDay();
+          }}
+        />
+      ) : null}
+      {view === "printer" ? <PrinterScreen outlet={boot.outlet} /> : null}
+
+      <nav className="bottombar" aria-label="Counter">
+        {nav.map(([v, label]) => (
+          <button key={v} type="button" className="btn" aria-current={view === v ? "page" : undefined} onClick={() => setView(v)}>
+            {label}
+          </button>
+        ))}
+        <span className="who">{staff.name}</span>
+        <button type="button" className="btn" onClick={lock}>
+          Lock
+        </button>
+      </nav>
+
+      {receipt ? (
+        <ReceiptSheet
+          order={receipt.order}
+          outlet={boot.outlet}
+          jobId={receipt.jobId}
+          onNewOrder={() => setReceipt(null)}
+          onPrint={() => setReceipt((r) => (r ? { ...r, jobId: printOrder(r.order, true) } : r))}
+          onOpenPrinter={() => {
+            setReceipt(null);
+            setView("printer");
+          }}
+        />
+      ) : null}
+
+      {failedSave ? (
+        <Sheet title="Bill not saved yet" onClose={() => setFailedSave(null)}>
+          <div className="error">{failedSave.error}</div>
+          <p className="muted" style={{ margin: 0 }}>
+            The order is still in the cart. Retrying uses the same bill number, so it can never be saved twice.
+          </p>
+          <button type="button" className="btn btn-dark btn-big" onClick={() => void saveOrder(failedSave.order, true)}>
+            Retry saving {failedSave.order.billNo}
+          </button>
+        </Sheet>
+      ) : null}
+
+      <Toast message={toast} onDone={clearToast} />
+    </div>
+  );
+}
