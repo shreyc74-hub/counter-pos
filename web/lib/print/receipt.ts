@@ -7,7 +7,15 @@ import type { DaySession, DayTotals, Order, Outlet } from "@/lib/domain/types";
  * so what staff see is exactly what prints.
  */
 export type ReceiptLine =
-  | { kind: "text"; text: string; align?: "left" | "center" | "right"; bold?: boolean; big?: boolean }
+  | {
+      kind: "text";
+      text: string;
+      align?: "left" | "center" | "right";
+      bold?: boolean;
+      big?: boolean;
+      /** Print only the first N characters bold (e.g. the item name, not its qty and amount). */
+      boldChars?: number;
+    }
   | { kind: "rule" }
   | { kind: "feed"; lines: number };
 
@@ -100,8 +108,9 @@ export function layoutReceipt(order: Order, outlet: Outlet, opts: ReceiptOptions
   t(row("Item", "Qty", "Amt", nameW, qtyW, amtW));
   for (const l of order.lines) {
     const nameLines = wrap(l.name, nameW);
-    t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW));
-    for (const extra of nameLines.slice(1)) t(extra);
+    // Item names are bold so they stand out; qty and amount stay regular.
+    t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW), { boldChars: nameW });
+    for (const extra of nameLines.slice(1)) t(extra, { bold: true });
     for (const m of l.modifiers) {
       const label = `  + ${m.name}`;
       t(m.pricePaise ? twoCol(label, formatAmount(m.pricePaise * l.qty), W) : toPrintable(label));

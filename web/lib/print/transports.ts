@@ -6,6 +6,8 @@ export interface PrintPayload {
   text: string;
   /** Which lines are big (double size), for browser printing. */
   bigLines: number[];
+  /** Bold lines (-1) or bold leading characters (n), by line index, for browser printing. */
+  boldLines?: Record<number, number>;
   widthChars: number;
 }
 
@@ -172,7 +174,12 @@ export class BrowserPrintTransport implements PrinterTransport {
     const mm = payload.widthChars >= 48 ? 80 : 58;
     const rows = payload.text
       .split("\n")
-      .map((line, i) => `<div class="${payload.bigLines.includes(i) ? "big" : ""}">${escapeHtml(line) || "&nbsp;"}</div>`)
+      .map((line, i) => {
+        const b = payload.boldLines?.[i];
+        const html =
+          b == null ? escapeHtml(line) : b < 0 ? `<b>${escapeHtml(line)}</b>` : `<b>${escapeHtml(line.slice(0, b))}</b>${escapeHtml(line.slice(b))}`;
+        return `<div class="${payload.bigLines.includes(i) ? "big" : ""}">${html || "&nbsp;"}</div>`;
+      })
       .join("");
     doc.open();
     doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title><style>

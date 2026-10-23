@@ -138,14 +138,17 @@ export class PrinterService {
     const width = this.settings.width;
     const textLines: string[] = [];
     const bigLines: number[] = [];
+    const boldLines: Record<number, number> = {};
     lines.forEach((l) => {
       if (l.kind === "text" && l.big) bigLines.push(textLines.length);
+      if (l.kind === "text" && (l.bold || l.boldChars)) boldLines[textLines.length] = l.bold ? -1 : (l.boldChars ?? -1);
       textLines.push(renderText([l], width));
     });
     return {
       bytes: encodeReceipt(lines, { cut: this.settings.cut }, width),
       text: textLines.join("\n"),
       bigLines,
+      boldLines,
       widthChars: width,
     };
   }

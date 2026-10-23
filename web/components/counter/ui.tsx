@@ -121,6 +121,14 @@ export function ReceiptPreview({ lines, width }: { lines: ReceiptLine[]; width: 
       {lines.map((l, i) => {
         const text = renderText([l], width);
         if (l.kind === "text") {
+          if (l.boldChars && !l.bold && !l.big && (l.align ?? "left") === "left") {
+            return (
+              <div key={i}>
+                <strong>{text.slice(0, l.boldChars)}</strong>
+                {text.slice(l.boldChars)}
+              </div>
+            );
+          }
           return (
             <div key={i} className={l.big ? "big" : l.bold ? "bold" : undefined}>
               {text || " "}

@@ -84,6 +84,20 @@ describe("ESC/POS encoding", () => {
     expect(bytes.length).toBeLessThan(2000);
   });
 
+  it("prints item names bold, but not their qty and amount", () => {
+    const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32 });
+    const item = lines.find((l) => l.kind === "text" && l.text.startsWith("Veg Momos"));
+    expect(item).toMatchObject({ boldChars: 19 });
+    const bytes = Buffer.from(encodeReceipt(lines, {}, 32));
+    const on = Buffer.from([0x1b, 0x45, 0x01]);
+    const off = Buffer.from([0x1b, 0x45, 0x00]);
+    const start = bytes.indexOf(Buffer.from("Veg Momos"));
+    // bold switched on right before the name and off before the qty column
+    expect(bytes.lastIndexOf(on, start)).toBe(start - 3);
+    const offAt = bytes.indexOf(off, start);
+    expect(bytes.subarray(start, offAt).toString("latin1")).toBe("Veg Momos Steamed  ");
+  });
+
   it("adds a cut only when asked", () => {
     const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32 });
     const cut = [0x1d, 0x56, 0x42, 0x00];
