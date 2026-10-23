@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { demoMenu } from "@/lib/data/demoMenu";
+import { fixtureMenu as demoMenu } from "@/lib/testing/fixtureMenu";
 import { businessDate, computeDayTotals, formatBillNo } from "./billing";
 import {
   addToCart,

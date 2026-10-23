@@ -30,22 +30,22 @@ do $$
 declare me jsonb; menu jsonb; vid uuid; iid uuid; cid uuid; hist jsonb; f jsonb; b jsonb;
 begin
   me := public.admin_me();
-  perform test.ok(me#>>'{outlets,0,name}' = 'Demo Momo Corner', 'owner is linked to the outlet by email');
+  perform test.ok(me#>>'{outlets,0,name}' = 'Street Heaven (demo)', 'owner is linked to the outlet by email');
   perform test.ok((select count(*) from public.orders) > 15000, 'owner can read their outlet''s orders');
 
   menu := public.admin_menu(test.id('outlet'));
   perform test.ok(exists (select 1 from jsonb_array_elements(menu->'variants') v
-                          where v->>'id' = test.id('v-veg-stm-full')::text and (v->>'costPaise')::int = 4200),
+                          where v->>'id' = test.id('veg-stm-f')::text and (v->>'costPaise')::int = 3000),
                   'admin menu includes costs');
 
   -- change a price: new history row, menu version goes up, counter sees the new price
-  perform public.admin_save_variant(test.id('outlet'), test.id('v-veg-stm-full'), test.id('it-veg-momos'),
-                                    'Steamed · Full', 2, true, 11000, 4500);
-  perform public.admin_save_variant(test.id('outlet'), test.id('v-veg-stm-full'), test.id('it-veg-momos'),
-                                    'Steamed · Full', 2, true, 11000, 4500);
-  hist := public.admin_price_history(test.id('outlet'), test.id('v-veg-stm-full'));
+  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-momos'),
+                                    'Steamed · Full', 2, true, 8900, 3500);
+  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-momos'),
+                                    'Steamed · Full', 2, true, 8900, 3500);
+  hist := public.admin_price_history(test.id('outlet'), test.id('veg-stm-f'));
   perform test.ok(jsonb_array_length(hist) = 2, 'a price change adds one history row (saving unchanged adds none)');
-  perform test.ok((hist->0->>'pricePaise')::int = 11000 and (hist->1->>'pricePaise')::int = 10000, 'old price kept in history');
+  perform test.ok((hist->0->>'pricePaise')::int = 8900 and (hist->1->>'pricePaise')::int = 7900, 'old price kept in history');
   perform test.ok((public.admin_menu(test.id('outlet'))->>'version')::int > (menu->>'version')::int, 'menu version goes up');
 
   -- add a category, item, size and combo
@@ -53,18 +53,18 @@ begin
   iid := public.admin_save_item(test.id('outlet'), null, cid, 'Hot & Sour Soup', false, 1, true, array[test.id('mod-less-spicy')]);
   vid := public.admin_save_variant(test.id('outlet'), null, iid, 'Regular', 1, true, 8000, null);
   perform public.admin_save_combo(test.id('outlet'), null, 'Soup combo', 'Soup + Veg Stm Half', true, 12500, null,
-    jsonb_build_array(jsonb_build_object('variantId', vid, 'qty', 1), jsonb_build_object('variantId', test.id('v-veg-stm-half'), 'qty', 1)));
+    jsonb_build_array(jsonb_build_object('variantId', vid, 'qty', 1), jsonb_build_object('variantId', test.id('veg-stm-h'), 'qty', 1)));
   perform test.expect_error(format('select public.admin_save_variant(%L, null, %L, %L, 1, true, -5, null)',
                                    test.id('outlet'), iid, 'Bad'), 'invalid');
-  perform public.admin_set_favourites(test.id('outlet'), array[vid, test.id('v-veg-stm-full'), vid]);
+  perform public.admin_set_favourites(test.id('outlet'), array[vid, test.id('veg-stm-f'), vid]);
 
   reset role;
   b := public.pos_bootstrap('demo-t1-key');
   perform test.ok(exists (select 1 from jsonb_array_elements(b#>'{menu,variants}') v where v->>'id' = vid::text and (v->>'pricePaise')::int = 8000),
                   'new item reaches the counter');
-  perform test.ok((b#>'{menu,favourites}') = to_jsonb(array[vid, test.id('v-veg-stm-full')]), 'favourites saved in order without duplicates');
+  perform test.ok((b#>'{menu,favourites}') = to_jsonb(array[vid, test.id('veg-stm-f')]), 'favourites saved in order without duplicates');
   perform test.ok(exists (select 1 from jsonb_array_elements(b#>'{menu,variants}') v
-                          where v->>'id' = test.id('v-veg-stm-full')::text and (v->>'pricePaise')::int = 11000), 'counter sees the new price');
+                          where v->>'id' = test.id('veg-stm-f')::text and (v->>'pricePaise')::int = 8900), 'counter sees the new price');
   set role authenticated;
 
   -- dashboard facts

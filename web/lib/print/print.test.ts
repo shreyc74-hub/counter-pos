@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { demoMenu, demoOutlet } from "@/lib/data/demoMenu";
+import { fixtureMenu as demoMenu, fixtureOutlet as demoOutlet } from "@/lib/testing/fixtureMenu";
 import { addToCart, buildPayments, findSellable, subtotalPaise } from "@/lib/domain/cart";
 import type { Order } from "@/lib/domain/types";
 import { encodeReceipt } from "./escpos";

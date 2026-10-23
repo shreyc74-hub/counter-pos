@@ -59,7 +59,9 @@ receipt screen shows **Retry**.
 1. Create a project at [supabase.com](https://supabase.com) (the free tier is fine for testing).
 2. In the project's **SQL editor**, run the files in order:
    `supabase/migrations/20261023000001_core_schema.sql`, then `…02_pos_api.sql`, then `…03_admin_api.sql`.
-   For the demo outlet, also run `supabase/seed.sql` (about 90 days of fake sales; takes a few seconds).
+   Then **`supabase/setup/street-heaven.sql`**: the real outlet with the full menu and prices (no fake data,
+   costs empty). Its last lines show how to add your email, the tablet's device key and staff PINs.
+   Optional, for trying things out: `supabase/seed.sql` adds a separate demo outlet with ~90 days of fake sales.
    (If you use the Supabase CLI: run `supabase init` once, then `supabase link` and `supabase db push`.)
 3. Copy `web/.env.example` to `web/.env.local` and fill in the project URL and **anon** key
    (Project settings → API).
@@ -68,19 +70,13 @@ receipt screen shows **Retry**.
 5. **Admin sign-in.** In Supabase → Authentication → URL Configuration, set the **Site URL**
    to your app's address (e.g. `https://your-app.vercel.app`) and add `https://your-app.vercel.app/admin`
    to **Redirect URLs**. Then link your email to the outlet once, in the SQL editor:
-   `update outlets set owner_email = 'you@example.com' where name = 'Demo Momo Corner';`
+   `update outlets set owner_email = 'you@example.com' where name = 'Street Heaven';`
    Open `/admin`, enter that email and click the link Supabase emails you. (To use the
    6-digit code instead, add `{{ .Token }}` to the *Magic Link* email template.)
 
-Registering the real outlet and tablet (until the admin panel exists), in the SQL editor:
-
-```sql
-insert into outlets (name, address_line, phone, fssai_no) values ('…', '…', '…', '…') returning id;
-insert into devices (outlet_id, code, name, token_hash)
-  values ('<outlet id>', 'T1', 'Counter tablet', _hash_key('<choose a long random key>'));
-insert into staff (outlet_id, name, role, pin_hash)
-  values ('<outlet id>', 'Shrey', 'owner', extensions.crypt('<4-digit PIN>', extensions.gen_salt('bf')));
-```
+The menu's source is `web/lib/data/menus/street-heaven.json` (see [`docs/menu.md`](docs/menu.md)).
+If it changes before go-live, edit the JSON and run `node supabase/menus/generate.mjs`.
+After go-live, change prices and costs in the admin panel.
 
 ### What the backend guarantees
 
@@ -98,7 +94,7 @@ insert into staff (outlet_id, name, role, pin_hash)
 ```bash
 cd web && npm test            # money, cart, bill numbers, receipt layout, printer bytes, demo store, dashboard metrics
 cd web && npm run typecheck
-supabase/tests/run-local.sh   # database: migrations + seed + 58 counter/admin API checks on a throwaway Postgres 16
+supabase/tests/run-local.sh   # database: migrations + seed + real-outlet setup + 66 checks on a throwaway Postgres 16
 ```
 
 ## Deploying

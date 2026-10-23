@@ -271,6 +271,8 @@ export function Dashboard({ store, outletId, menu }: { store: AdminStore; outlet
 
 function computeView(facts: Facts, from: string, to: string, len: number, menu: AdminMenu | null, untilMinutes?: number) {
   const cur = inRange(facts, from, to);
+  // The upsell to watch: drinks if the menu has them, otherwise snacks (spring rolls, fries).
+  const addOnCategory = menu ? (["Drinks", "Snacks"].find((n) => menu.categories.some((c) => c.name.toLowerCase() === n.toLowerCase())) ?? null) : null;
   const single = len === 1;
   const baseline: Summary | null = single
     ? typicalSummary(facts, from, 4, untilMinutes)
@@ -291,8 +293,9 @@ function computeView(facts: Facts, from: string, to: string, len: number, menu: 
     prevExpenses: prevFacts ? expensesByCategory(prevFacts.expenses) : null,
     channels: channelMix(cur.orders),
     stockOuts: stockOutCounts(cur, menu),
-    drinkRate: menu ? attachRate(cur.orders, menu, "Drinks") : null,
-    prevDrinkRate: menu && prevFacts ? attachRate(prevFacts.orders, menu, "Drinks") : null,
+    addOnCategory,
+    drinkRate: menu && addOnCategory ? attachRate(cur.orders, menu, addOnCategory) : null,
+    prevDrinkRate: menu && prevFacts && addOnCategory ? attachRate(prevFacts.orders, menu, addOnCategory) : null,
     openDay: cur.days.find((d) => d.closedAt == null) ?? null,
   };
 }
@@ -366,11 +369,11 @@ function Attention({ view }: { view: View }) {
   if (view.drinkRate != null) {
     const d = view.prevDrinkRate != null ? view.drinkRate - view.prevDrinkRate : null;
     notes.push({
-      title: `Drink add-on rate ${pct(view.drinkRate)}`,
+      title: `${view.addOnCategory} add-on rate ${pct(view.drinkRate)}`,
       body:
         d != null && Math.abs(d) >= 0.01
-          ? `${d < 0 ? "Down" : "Up"} from ${pct(view.prevDrinkRate)} in the previous period. A momo + drink combo at the counter can lift it.`
-          : "Share of orders that include a drink.",
+          ? `${d < 0 ? "Down" : "Up"} from ${pct(view.prevDrinkRate)} in the previous period. Offering one with every momo order can lift it.`
+          : `Share of orders that include something from ${view.addOnCategory}.`,
     });
   }
   for (const so of view.stockOuts.slice(0, 2)) {

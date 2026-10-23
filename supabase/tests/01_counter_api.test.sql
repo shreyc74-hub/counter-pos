@@ -31,6 +31,12 @@ grant execute on function test.ok(boolean, text) to anon;
 create function test.id(t text) returns uuid language sql immutable as $$ select md5('cpos:' || t)::uuid $$;
 grant execute on function test.id(text) to anon;
 
+-- A priced add-on for the tests (the real menu's add-ons are all free).
+insert into public.modifiers (id, outlet_id, name) values (test.id('mod-test-mayo'), test.id('outlet'), 'Extra mayo');
+insert into public.item_modifiers (item_id, modifier_id) values (test.id('it-veg-momos'), test.id('mod-test-mayo'));
+insert into public.price_history (outlet_id, ref_kind, ref_id, price_paise, cost_paise, effective_from)
+values (test.id('outlet'), 'modifier', test.id('mod-test-mayo'), 1000, 300, now() - interval '1 day');
+
 -- A second device so PIN lockout tests don't lock the main one.
 insert into public.devices (outlet_id, code, token_hash)
 values (test.id('outlet'), 'T2', public._hash_key('demo-t2-key'));
@@ -84,7 +90,7 @@ begin
   b := public.pos_bootstrap('demo-t1-key');
   perform test.ok(b#>>'{device,code}' = 'T1', 'bootstrap returns the device');
   perform test.ok(jsonb_array_length(b#>'{menu,favourites}') = 12, 'bootstrap returns 12 favourites');
-  perform test.ok(jsonb_array_length(b#>'{menu,variants}') = 18, 'bootstrap returns 18 variants');
+  perform test.ok(jsonb_array_length(b#>'{menu,variants}') = 60, 'bootstrap returns all 60 menu options');
   perform test.ok(not exists (select 1 from jsonb_array_elements(b#>'{menu,variants}') v where v->>'costPaise' is not null),
                   'costs are never sent to the counter');
   perform test.ok((b->>'lastBillSeq')::int > 15000, 'bootstrap tells the device where its bill numbers are');
@@ -106,7 +112,7 @@ end $$;
 do $$
 declare
   ses uuid; owner_ses uuid; d jsonb; o jsonb; r jsonb; ap jsonb; dayid uuid; seq int;
-  veg uuid := test.id('v-veg-stm-full'); drink uuid := test.id('v-drink-250'); mayo uuid := test.id('mod-mayo');
+  veg uuid := test.id('veg-stm-f'); roll uuid := test.id('spring-roll-h'); mayo uuid := test.id('mod-test-mayo');
   base jsonb;
 begin
   ses := (public.pos_login('demo-t1-key', '1111')->>'session')::uuid;
@@ -123,16 +129,16 @@ begin
     'id', gen_random_uuid(), 'billNo', 'T1-' || lpad((seq + 1)::text, 6, '0'), 'token', 1,
     'daySessionId', dayid, 'channel', 'counter', 'menuVersion', 1, 'createdAt', now(),
     'lines', jsonb_build_array(
-      jsonb_build_object('kind', 'variant', 'refId', veg, 'name', 'Veg Momos Steamed Full', 'qty', 2, 'unitPricePaise', 10000,
+      jsonb_build_object('kind', 'variant', 'refId', veg, 'name', 'Veg Momos Steamed Full', 'qty', 2, 'unitPricePaise', 7900,
                          'modifiers', jsonb_build_array(jsonb_build_object('modifierId', mayo, 'pricePaise', 1000))),
-      jsonb_build_object('kind', 'variant', 'refId', drink, 'name', 'Cold drink 250 ml', 'qty', 1, 'unitPricePaise', 2500,
+      jsonb_build_object('kind', 'variant', 'refId', roll, 'name', 'Spring Roll Half', 'qty', 1, 'unitPricePaise', 4900,
                          'modifiers', '[]'::jsonb)),
-    'totalPaise', 24500,
-    'payments', jsonb_build_array(jsonb_build_object('method', 'cash', 'amountPaise', 24500, 'cashReceivedPaise', 50000)));
+    'totalPaise', 22700,
+    'payments', jsonb_build_array(jsonb_build_object('method', 'cash', 'amountPaise', 22700, 'cashReceivedPaise', 50000)));
 
   -- wrong price is refused
   perform test.expect_error(format('select public.pos_submit_order(%L, %L)', ses,
-    jsonb_set(base, '{lines,1,unitPricePaise}', '2000')), 'conflict');
+    jsonb_set(base, '{lines,1,unitPricePaise}', '4000')), 'conflict');
   -- payments must add up
   perform test.expect_error(format('select public.pos_submit_order(%L, %L)', ses,
     jsonb_set(base, '{payments,0,amountPaise}', '20000')), 'invalid');
@@ -141,22 +147,22 @@ begin
     jsonb_set(base, '{billNo}', '"T2-000001"')), 'invalid');
 
   o := public.pos_submit_order(ses, base);
-  perform test.ok((o->>'totalPaise')::int = 24500 and (o->>'subtotalPaise')::int = 24500, 'valid bill is saved with server-checked totals');
+  perform test.ok((o->>'totalPaise')::int = 22700 and (o->>'subtotalPaise')::int = 22700, 'valid bill is saved with server-checked totals');
   perform test.ok(o->>'staffName' = 'Ramesh', 'bill is saved under the logged-in staff member');
   r := public.pos_submit_order(ses, base);
   perform test.ok(r->>'id' = o->>'id', 'resubmitting the same bill returns it instead of duplicating');
 
   -- discount above the cashier limit needs an owner approval token, used once
   base := base || jsonb_build_object('id', gen_random_uuid(), 'billNo', 'T1-' || lpad((seq + 2)::text, 6, '0'), 'token', 2,
-            'totalPaise', 14500,
+            'totalPaise', 12700,
             'discount', jsonb_build_object('amountPaise', 10000, 'reason', 'Complaint'),
-            'payments', jsonb_build_array(jsonb_build_object('method', 'upi', 'amountPaise', 14500)));
+            'payments', jsonb_build_array(jsonb_build_object('method', 'upi', 'amountPaise', 12700)));
   perform test.expect_error(format('select public.pos_submit_order(%L, %L)', ses, base), 'not_allowed');
   perform test.ok(public.pos_owner_approval(ses, '1111') is null, 'cashier PIN is not an owner approval');
   ap := public.pos_owner_approval(ses, '1234');
   perform test.ok(ap->>'name' = 'Shrey', 'owner PIN gives an approval');
   o := public.pos_submit_order(ses, jsonb_set(base, '{discount,approvalToken}', to_jsonb(ap->>'approvalToken')));
-  perform test.ok(o#>>'{discount,approvedBy}' = 'Shrey' and (o->>'totalPaise')::int = 14500, 'approved discount saved');
+  perform test.ok(o#>>'{discount,approvedBy}' = 'Shrey' and (o->>'totalPaise')::int = 12700, 'approved discount saved');
   perform test.expect_error(format('select public.pos_submit_order(%L, %L)', ses,
     jsonb_set(base || jsonb_build_object('id', gen_random_uuid(), 'billNo', 'T1-' || lpad((seq + 3)::text, 6, '0')),
               '{discount,approvalToken}', to_jsonb(ap->>'approvalToken'))), 'not_allowed');
@@ -164,10 +170,10 @@ begin
 
   -- a small discount needs no approval; split payment
   o := public.pos_submit_order(ses, base || jsonb_build_object(
-         'id', gen_random_uuid(), 'billNo', 'T1-' || lpad((seq + 3)::text, 6, '0'), 'token', 3, 'totalPaise', 22500,
+         'id', gen_random_uuid(), 'billNo', 'T1-' || lpad((seq + 3)::text, 6, '0'), 'token', 3, 'totalPaise', 20700,
          'discount', jsonb_build_object('amountPaise', 2000, 'reason', 'Staff meal'),
          'payments', jsonb_build_array(jsonb_build_object('method', 'cash', 'amountPaise', 10000),
-                                       jsonb_build_object('method', 'upi', 'amountPaise', 12500))));
+                                       jsonb_build_object('method', 'upi', 'amountPaise', 10700))));
   perform test.ok(jsonb_array_length(o->'payments') = 2 and o->'discount'->>'approvedBy' is null, 'small discount + split payment');
 
   -- voids: cashier needs the owner PIN; the bill itself never changes
@@ -196,9 +202,9 @@ begin
   perform public.pos_set_sold_out(ses, veg, false);
   perform test.ok(not (public.pos_bootstrap('demo-t1-key')->'soldOut' @> to_jsonb(array[veg])), 'back in stock');
 
-  -- close: float 1000 + cash 245 (bill 1) − 85 expense − 200 cash out = 960; bill 3 (cash 100) is voided
-  d := public.pos_close_day(ses, 95000, jsonb_build_array(jsonb_build_object('variantId', veg, 'plates', 3)));
-  perform test.ok((d->>'expectedCashPaise')::int = 96000, format('expected cash computed on the server (%s)', d->>'expectedCashPaise'));
+  -- close: float 1000 + cash 227 (bill 1) − 85 expense − 200 cash out = 942; bill 3 (cash 100) is voided
+  d := public.pos_close_day(ses, 93200, jsonb_build_array(jsonb_build_object('variantId', veg, 'plates', 3)));
+  perform test.ok((d->>'expectedCashPaise')::int = 94200, format('expected cash computed on the server (%s)', d->>'expectedCashPaise'));
   perform test.ok((d->>'variancePaise')::int = -1000, 'difference saved');
   perform test.ok(jsonb_array_length(d->'leftovers') = 1, 'leftovers saved');
   perform test.expect_error(format('select public.pos_submit_order(%L, %L)', ses,
@@ -215,9 +221,9 @@ begin
   join public.day_sessions d on d.id = o.day_session_id
   where o.token = 1 order by d.opened_at desc limit 1;
   perform test.ok((select count(*) from public.order_lines where order_id = oid) = 2, 'only one copy of the resubmitted bill');
-  perform test.ok((select unit_cost_paise from public.order_lines where order_id = oid and line_no = 1) = 4200,
+  perform test.ok((select unit_cost_paise from public.order_lines where order_id = oid and line_no = 1) = 3000,
                   'cost snapshotted on the server');
-  perform test.ok((select line_total_paise from public.order_lines where order_id = oid and line_no = 1) = 22000,
+  perform test.ok((select line_total_paise from public.order_lines where order_id = oid and line_no = 1) = 17800,
                   'line total includes add-ons x qty');
   perform test.ok((select count(*) from public.events where type = 'order_voided') >= 2, 'voids are in the audit log');
 end $$;

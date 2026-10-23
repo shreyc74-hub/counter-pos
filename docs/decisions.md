@@ -30,7 +30,7 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | D-215 | **Product goal:** a fast native POS that solves the pains above **and helps Shrey make more profit through data-informed decisions**. Profit levers and the data each needs are in `docs/00-vision.md` | LOCKED | Shrey, 22 Oct 2026 | |
 | D-216 | V1 captures the data later insights need from day one: cost per item/variant, staff on every action, exact timestamps, void/discount reasons, order channel, optional wastage at close | HYPOTHESIS | 00-vision | Depends on Shrey being willing to enter costs and wastage (Q18) |
 | D-213 | Admin panel (menu, dashboard, expenses, insights, staff) remains a web app long-term; Android is the counter only | HYPOTHESIS | Revision 2 | |
-| D-214 | Menu: placeholder in `docs/menu.md` until Shrey shares the real one | LOCKED | Shrey, 22 Oct 2026 | |
+| D-214 | Menu: placeholder in `docs/menu.md` until Shrey shares the real one | REPLACED | Shrey, 22 Oct 2026 | Superseded by D-233 |
 | D-217 | Wastage entry is **optional**: a 30-second "leftovers" step in day close (stepper per batch-cooked item, can be skipped). Prep forecasts are built from **sales data alone**; wastage only measures the savings | HYPOTHESIS | Shrey Q, 22 Oct 2026 | Shrey prefers "use the app and let the data build up" |
 | D-218 | Marking an item **sold out** in the counter screen is logged with a timestamp, so forecasts know demand was cut short | HYPOTHESIS | 22 Oct 2026 | |
 | D-101 | Counter device is an Android **tablet (8–10", Android 12+)**, not a phone | HYPOTHESIS | Phase 1 §2.2, §7 | D-202 locks Android; device form factor still open |
@@ -85,3 +85,7 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | D-230 | Dashboard metrics are computed in the app from compact daily "facts" fetched per date range (one metrics module, unit-tested), instead of SQL views | HYPOTHESIS | Build, 23 Oct 2026 | Deviation from D-306; fine at ~300 bills/day (a 90-day view ≈ 20k bills). Move heavy metrics into SQL if multi-outlet or volume grows |
 | D-231 | "Today" compares with the same weekday over the previous 4 weeks, up to the same time of day; longer ranges compare with the previous period of equal length | HYPOTHESIS | Build, 23 Oct 2026 | |
 | D-232 | Demo admin runs on 90 days of generated data in the browser (same planted patterns as the database seed) plus any orders taken on the demo counter in that browser | HYPOTHESIS | Build, 23 Oct 2026 | |
+| D-233 | **Real menu loaded: Street Heaven** (16 dishes, 60 options) from Shrey's printed menu; one JSON source generates the demo menu, the demo seed and the real-outlet setup script | LOCKED | Shrey, 23 Oct 2026 | `docs/menu.md` |
+| D-234 | Momos grouped by filling with 8 options (Steamed/Fried/Kurkure/Gravy × Half/Full); noodles/rice dishes have Noodles/Fried Rice × Half/Full | HYPOTHESIS | 23 Oct 2026 | Keeps prep forecast per filling; Favourites give one-tap tiles |
+| D-235 | The "add-on rate" insight tracks Drinks if the menu has them, otherwise Snacks (spring rolls, fries) | HYPOTHESIS | 23 Oct 2026 | Street Heaven has no drinks on the menu |
+| D-236 | Unit tests use a fixed test menu; demo-history tests use the real menu | HYPOTHESIS | 23 Oct 2026 | Price changes never break tests |

@@ -187,7 +187,7 @@ function NoOutlet({ email }: { email: string }) {
         In Supabase, open the SQL editor and run this once, with your outlet&apos;s name. Then sign in again.
       </p>
       <pre className="receipt" style={{ whiteSpace: "pre-wrap" }}>
-        {`update outlets set owner_email = '${email}' where name = 'Demo Momo Corner';`}
+        {`update outlets set owner_email = '${email}' where name = 'Street Heaven';`}
       </pre>
     </div>
   );

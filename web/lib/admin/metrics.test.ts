@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { demoMenu } from "@/lib/data/demoMenu";
+import { demoMenu as realMenu } from "@/lib/data/demoMenu";
+import { fixtureMenu as demoMenu } from "@/lib/testing/fixtureMenu";
 import { generateDemoHistory } from "./demoHistory";
 import { toAdminMenu, toCounterMenu } from "./menu";
 import {
@@ -168,12 +169,18 @@ describe("staff leakage", () => {
   });
 });
 
-describe("demo history (planted patterns the dashboard must show)", () => {
+describe("demo history on the real menu (planted patterns the dashboard must show)", () => {
   const today = "2026-10-23";
-  const f = generateDemoHistory(menu, 90, today);
+  const real = toAdminMenu(realMenu);
+  const f = generateDemoHistory(real, 90, today);
 
   it("is deterministic", () => {
-    expect(generateDemoHistory(menu, 90, today).orders.length).toBe(f.orders.length);
+    expect(generateDemoHistory(real, 90, today).orders.length).toBe(f.orders.length);
+  });
+
+  it("only sells things that are on the menu, at menu prices", () => {
+    const price = new Map(real.variants.map((v) => [v.id, v.pricePaise]));
+    expect(f.orders.every((o) => o.lines.every((l) => price.get(l.refId) === l.total / l.qty))).toBe(true);
   });
 
   it("peaks in the evening", () => {
@@ -195,10 +202,15 @@ describe("demo history (planted patterns the dashboard must show)", () => {
     expect(pack(addDays(today, -30), addDays(today, -1))).toBeGreaterThan(pack(addDays(today, -60), addDays(today, -31)) * 1.2);
   });
 
-  it("drink add-on rate is around 12–25% (drinks + combos)", () => {
-    const r = attachRate(f.orders, menu, "Drinks")!;
-    expect(r).toBeGreaterThan(0.12);
-    expect(r).toBeLessThan(0.3);
+  it("snack add-on rate is around 12%", () => {
+    const r = attachRate(f.orders, real, "Snacks")!;
+    expect(r).toBeGreaterThan(0.08);
+    expect(r).toBeLessThan(0.2);
+  });
+
+  it("Paneer Kurkure Full sells out on Fridays", () => {
+    expect(f.stockOuts.length).toBeGreaterThanOrEqual(12);
+    expect(f.stockOuts.every((s) => s.refId === "pan-kur-f")).toBe(true);
   });
 
   it("has a usual-weekday baseline for comparisons", () => {

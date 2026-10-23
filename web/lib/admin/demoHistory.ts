@@ -4,28 +4,32 @@ import { addDays, todayIst, weekday } from "./metrics";
 // Builds 90 days of fake history for the demo outlet, in the browser, with the same
 // planted patterns as supabase/seed.sql (so the demo dashboard has a story to tell):
 //   evening peak 7–9 pm, weekends +30%, a few rain days
-//   drink add-on ~12%, combo ~8% of orders
-//   Paneer Fried Full sells out on Fridays around 8:30 pm
+//   snack add-on (spring roll / fries) on ~12% of orders
+//   Paneer Kurkure Full sells out on Fridays around 8:30 pm
 //   Sita voids ~6% of bills vs ~1.5% for Ramesh, and her days run cash-short
 //   packaging spend up ~30% in the last 30 days; ~15% Swiggy/Zomato
 
 const HOUR_WEIGHTS = [4, 14, 18, 10, 7, 9, 15, 24, 36, 33, 26, 18]; // 11:00 … 22:00
 const PICKS = [
-  ["v-veg-stm-full", 5],
-  ["v-chk-fry-full", 3],
-  ["v-chk-stm-full", 2],
-  ["v-veg-fry-full", 2],
-  ["v-pan-stm-full", 2],
-  ["v-pan-fry-full", 1],
-  ["v-veg-stm-half", 2],
-  ["v-chk-stm-half", 1],
-  ["v-pan-stm-half", 1],
-  ["v-veg-fry-half", 1],
-  ["v-veg-chow-full", 2],
-  ["v-veg-chow-half", 1],
-  ["v-chilli-pan-dry", 1],
-  ["v-chilli-pan-gravy", 1],
+  ["veg-stm-f", 6],
+  ["pan-stm-f", 4],
+  ["veg-fry-f", 3],
+  ["pan-fry-f", 3],
+  ["pan-kur-f", 3],
+  ["veg-kur-f", 2],
+  ["soy-stm-f", 1],
+  ["veg-stm-h", 3],
+  ["pan-stm-h", 1],
+  ["pan-grv-f", 1],
+  ["veg-grv-f", 1],
+  ["hakka-nd-f", 2],
+  ["veg-nr-nd-f", 2],
+  ["veg-nr-rc-f", 1],
+  ["chilli-paneer-h", 1],
+  ["honey-potato-h", 1],
+  ["veg-manch-h", 1],
 ] as const;
+const SNACKS = ["spring-roll-f", "spring-roll-h", "fries-h", "kurkure-roll-h"];
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -63,7 +67,7 @@ export function generateDemoHistory(menu: AdminMenu, days = 90, today = todayIst
     const factor = (dow >= 5 ? 1.3 : dow === 1 ? 0.85 : 1) * (random() < 0.06 ? 1.2 : 1) * (0.88 + random() * 0.24);
     const dayId = `demo-day-${date}`;
     const soldOutAt = dow === 5 ? at(date, 20, 30) + Math.floor(random() * 15) * 60_000 : null;
-    if (soldOutAt) out.stockOuts.push({ refId: "v-pan-fry-full", at: soldOutAt } satisfies StockOutFact);
+    if (soldOutAt) out.stockOuts.push({ refId: "pan-kur-f", at: soldOutAt } satisfies StockOutFact);
 
     let cashSales = 0;
     HOUR_WEIGHTS.forEach((w, hi) => {
@@ -81,19 +85,16 @@ export function generateDemoHistory(menu: AdminMenu, days = 90, today = todayIst
             existing.total += p;
             existing.cost = existing.cost == null || c == null ? null : existing.cost + c;
           } else {
-            lines.push({ refId: id, kind: id.startsWith("combo") ? "combo" : "variant", qty: 1, total: p, cost: c });
+            lines.push({ refId: id, kind: menu.combos.some((x) => x.id === id) ? "combo" : "variant", qty: 1, total: p, cost: c });
           }
         };
         const nLines = 1 + (random() < 0.35 ? 1 : 0) + (random() < 0.08 ? 1 : 0);
         for (let ln = 0; ln < nLines; ln++) {
-          if (ln === 0 && random() < 0.08) addLine("combo-1");
-          else {
-            let id: string = pick();
-            if (id === "v-pan-fry-full" && soldOutAt && t > soldOutAt) id = "v-pan-stm-full";
-            addLine(id);
-          }
+          let id: string = pick();
+          if (id === "pan-kur-f" && soldOutAt && t > soldOutAt) id = "pan-fry-f";
+          addLine(id);
         }
-        if (random() < 0.12) addLine("v-drink-250");
+        if (random() < 0.12) addLine(SNACKS[Math.floor(random() * SNACKS.length)]);
         if (!lines.length) continue;
         const subtotal = lines.reduce((s, l) => s + l.total, 0);
         const discount = random() < 0.05 ? Math.min(1000, subtotal) : 0;
