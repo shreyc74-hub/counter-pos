@@ -22,7 +22,9 @@ create role anon nologin;
 create role authenticated nologin;
 create schema extensions;
 create schema auth;
-create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+-- Same behaviour as Supabase: the signed-in user's JWT claims arrive in request.jwt.claims.
+create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt()->>'sub', '')::uuid $$;
 grant usage on schema public, extensions, auth to anon, authenticated;
 SQL
 
@@ -32,7 +34,9 @@ for f in supabase/migrations/*.sql; do
 done
 echo "seed"
 time psql -q -v ON_ERROR_STOP=1 -f supabase/seed.sql
-echo "tests"
-psql -q -v ON_ERROR_STOP=1 -f supabase/tests/api.test.sql
+for t in supabase/tests/*.test.sql; do
+  echo "tests: $t"
+  psql -q -v ON_ERROR_STOP=1 -f "$t"
+done
 echo "ALL DATABASE TESTS PASSED"
 if [[ "${1:-}" == "--keep" ]]; then echo "server left running: PGHOST=$DATA PGPORT=$PORT"; fi

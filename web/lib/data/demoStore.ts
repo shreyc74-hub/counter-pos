@@ -1,10 +1,12 @@
 import { businessDate, computeDayTotals, formatBillNo } from "@/lib/domain/billing";
 import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
-import { demoMenu, demoOutlet, demoStaff } from "./demoMenu";
+import { toCounterMenu } from "@/lib/admin/menu";
+import { demoOutlet, demoStaff } from "./demoMenu";
+import { loadDemoAdminMenu } from "./demoMenuStorage";
 import { type Bootstrap, type CloseDayInput, type OwnerApproval, type PosStore, StoreError } from "./store";
 
-interface DemoState {
+export interface DemoState {
   days: DaySession[];
   orders: Order[];
   expenses: Expense[];
@@ -36,7 +38,7 @@ export class DemoStore implements PosStore {
   constructor(private readonly storage: Pick<Storage, "getItem" | "setItem"> | null = safeLocalStorage()) {}
 
   async load(): Promise<Bootstrap> {
-    return { outlet: demoOutlet, device: DEVICE, menu: demoMenu, soldOut: this.read().soldOut };
+    return { outlet: demoOutlet, device: DEVICE, menu: toCounterMenu(loadDemoAdminMenu(this.storage)), soldOut: this.read().soldOut };
   }
 
   async login(pin: string): Promise<Staff | null> {
@@ -248,4 +250,15 @@ function safeLocalStorage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+/** Read-only view of the demo counter's data, for the demo admin dashboard. */
+export function readDemoCounterState(s: Pick<Storage, "getItem"> | null): DemoState {
+  try {
+    const raw = s?.getItem(KEY);
+    if (raw) return { ...empty(), ...(JSON.parse(raw) as DemoState) };
+  } catch {
+    // ignore
+  }
+  return empty();
 }

@@ -1,14 +1,14 @@
 # Counter POS
 
 Fast counter billing for a momo / Chinese food outlet: orders in ≤5 taps, cash or UPI,
-Bluetooth receipt printing, day open/close with a cash check, expenses, and (next) an
-admin panel with insights. Planning docs are in [`docs/`](docs/); every decision is in
+Bluetooth receipt printing, day open/close with a cash check, expenses, and an admin
+panel with the menu, prices and costs, and a live dashboard. Planning docs are in [`docs/`](docs/); every decision is in
 [`docs/decisions.md`](docs/decisions.md).
 
 | Folder | What it is |
 |---|---|
-| `web/` | Next.js app. `/counter` is the counter screen (the admin panel comes next) |
-| `supabase/` | Database: tables, business rules (`pos_*` functions), demo data, tests |
+| `web/` | Next.js app. `/counter` is the counter screen, `/admin` is the owner's admin panel |
+| `supabase/` | Database: tables, business rules (`pos_*` counter and `admin_*` owner functions), demo data, tests |
 | `docs/` | Research, architecture, V1 plan, decisions |
 
 ## Try it in 1 minute (no backend)
@@ -21,6 +21,21 @@ npm run dev        # open http://localhost:3000
 
 With no Supabase settings the app runs on **demo data stored in your browser**.
 Demo PINs: **Shrey 1234** (owner), **Ramesh 1111**, **Sita 2222**.
+Open `/admin` and enter **1234** to see the dashboard on 90 days of made-up sales, and
+edit the menu. Menu changes made there show up on the demo counter in the same browser.
+
+## Admin panel (`/admin`)
+
+- **Dashboard:** today (live, refreshes every 30 s) or the last 7 / 30 / 90 days. Sales, orders,
+  average order value, gross margin, cash vs UPI, money out, expected drawer cash;
+  orders by hour against a usual day; sales by day; items by sales and margin; money out by
+  category; voids, discounts and cash shortfalls by staff; day-by-day list; and a
+  "Needs your attention" list (high voids, cash short, drink add-on rate, sell-outs,
+  rising costs, items without a cost). Today is compared with the same weekday over the
+  last 4 weeks *up to the same time of day*.
+- **Menu & prices:** categories, items, sizes, add-ons, combos, and the counter's
+  Favourites tiles. Prices and costs show the margin as you type; every change is kept
+  in the price history, and old bills keep the price they were sold at.
 
 ## Printing to the thermal printer
 
@@ -43,13 +58,19 @@ receipt screen shows **Retry**.
 
 1. Create a project at [supabase.com](https://supabase.com) (the free tier is fine for testing).
 2. In the project's **SQL editor**, run the files in order:
-   `supabase/migrations/20261023000001_core_schema.sql`, then `…02_pos_api.sql`.
+   `supabase/migrations/20261023000001_core_schema.sql`, then `…02_pos_api.sql`, then `…03_admin_api.sql`.
    For the demo outlet, also run `supabase/seed.sql` (about 90 days of fake sales; takes a few seconds).
    (If you use the Supabase CLI: run `supabase init` once, then `supabase link` and `supabase db push`.)
 3. Copy `web/.env.example` to `web/.env.local` and fill in the project URL and **anon** key
    (Project settings → API).
 4. `npm run dev` again. The counter asks for a **device key** once per tablet.
    Demo outlet key: `demo-t1-key`.
+5. **Admin sign-in.** In Supabase → Authentication → URL Configuration, set the **Site URL**
+   to your app's address (e.g. `https://your-app.vercel.app`) and add `https://your-app.vercel.app/admin`
+   to **Redirect URLs**. Then link your email to the outlet once, in the SQL editor:
+   `update outlets set owner_email = 'you@example.com' where name = 'Demo Momo Corner';`
+   Open `/admin`, enter that email and click the link Supabase emails you. (To use the
+   6-digit code instead, add `{{ .Token }}` to the *Magic Link* email template.)
 
 Registering the real outlet and tablet (until the admin panel exists), in the SQL editor:
 
@@ -75,9 +96,9 @@ insert into staff (outlet_id, name, role, pin_hash)
 ## Tests
 
 ```bash
-cd web && npm test            # money, cart, bill numbers, receipt layout, printer bytes, demo store
+cd web && npm test            # money, cart, bill numbers, receipt layout, printer bytes, demo store, dashboard metrics
 cd web && npm run typecheck
-supabase/tests/run-local.sh   # database: runs migrations + seed + 42 API checks on a throwaway Postgres 16
+supabase/tests/run-local.sh   # database: migrations + seed + 58 counter/admin API checks on a throwaway Postgres 16
 ```
 
 ## Deploying
