@@ -30,11 +30,13 @@ export interface CloseDayInput {
  */
 export interface PosStore {
   readonly kind: "demo" | "supabase";
+  /** Supabase only: the key that registers this tablet as a counter device. */
+  setDeviceKey?(key: string): void;
   load(): Promise<Bootstrap>;
   /** Returns the staff member for a PIN, or null. */
   login(pin: string): Promise<Staff | null>;
-  /** Checks an owner PIN for approvals (voids, big discounts). */
-  verifyOwnerPin(pin: string): Promise<Staff | null>;
+  /** Owner approval for a big discount. Null if the PIN is not an owner's. */
+  approveAsOwner(pin: string): Promise<OwnerApproval | null>;
   logout(): Promise<void>;
 
   currentDay(): Promise<DaySession | null>;
@@ -57,10 +59,25 @@ export interface PosStore {
   setSoldOut(sellableId: string, soldOut: boolean): Promise<void>;
 }
 
+export interface OwnerApproval {
+  name: string;
+  approvalToken: string;
+}
+
+export type StoreErrorCode =
+  | "no_device"
+  | "no_session"
+  | "no_open_day"
+  | "not_allowed"
+  | "invalid"
+  | "network"
+  | "conflict"
+  | "locked";
+
 export class StoreError extends Error {
   constructor(
     message: string,
-    readonly code: "no_session" | "no_open_day" | "not_allowed" | "invalid" | "network" | "conflict",
+    readonly code: StoreErrorCode,
   ) {
     super(message);
   }

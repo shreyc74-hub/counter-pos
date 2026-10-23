@@ -1,0 +1,217 @@
+import { formatBillNo } from "@/lib/domain/billing";
+import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/lib/domain/types";
+import {
+  type Bootstrap,
+  type CloseDayInput,
+  type OwnerApproval,
+  type PosStore,
+  StoreError,
+  type StoreErrorCode,
+} from "./store";
+
+const DEVICE_KEY = "cpos.deviceKey";
+const SEQ_KEY = (deviceId: string) => `cpos.billSeq.${deviceId}`;
+const TOKEN_KEY = (dayId: string) => `cpos.token.${dayId}`;
+
+const KNOWN_CODES: StoreErrorCode[] = [
+  "no_device",
+  "no_session",
+  "no_open_day",
+  "not_allowed",
+  "invalid",
+  "network",
+  "conflict",
+  "locked",
+];
+
+/**
+ * Talks to the Supabase backend through its Postgres functions (pos_*), called over
+ * the REST endpoint Supabase exposes for them. All business rules run in the database.
+ */
+export class SupabaseStore implements PosStore {
+  readonly kind = "supabase" as const;
+  private session: string | null = null;
+  private deviceId: string | null = null;
+  private deviceCode: string | null = null;
+  private dayId: string | null = null;
+
+  constructor(
+    private readonly url: string,
+    private readonly anonKey: string,
+    private readonly storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = safeLocalStorage(),
+  ) {}
+
+  setDeviceKey(key: string): void {
+    this.storage?.setItem(DEVICE_KEY, key.trim());
+  }
+
+  private deviceKey(): string {
+    const key = this.storage?.getItem(DEVICE_KEY);
+    if (!key) throw new StoreError("This tablet is not set up yet. Enter the device key.", "no_device");
+    return key;
+  }
+
+  async load(): Promise<Bootstrap & { lastBillSeq?: number }> {
+    const b = await this.rpc<Bootstrap & { lastBillSeq: number }>("pos_bootstrap", { p_device_key: this.deviceKey() });
+    this.deviceId = b.device.id;
+    this.deviceCode = b.device.code;
+    // Never go below what the server has already seen from this device.
+    const local = Number(this.storage?.getItem(SEQ_KEY(b.device.id)) ?? 0);
+    this.storage?.setItem(SEQ_KEY(b.device.id), String(Math.max(local, b.lastBillSeq)));
+    return b;
+  }
+
+  async login(pin: string): Promise<Staff | null> {
+    const r = await this.rpc<{ session: string; staff: Staff } | null>("pos_login", {
+      p_device_key: this.deviceKey(),
+      p_pin: pin,
+    });
+    this.session = r?.session ?? null;
+    return r?.staff ?? null;
+  }
+
+  async approveAsOwner(pin: string): Promise<OwnerApproval | null> {
+    return this.rpc<OwnerApproval | null>("pos_owner_approval", { p_session: this.requireSession(), p_pin: pin });
+  }
+
+  async logout(): Promise<void> {
+    const s = this.session;
+    this.session = null;
+    if (s) await this.rpc("pos_logout", { p_session: s }).catch(() => undefined);
+  }
+
+  async currentDay(): Promise<DaySession | null> {
+    const d = await this.rpc<(DaySession & { lastToken: number }) | null>("pos_current_day", {
+      p_session: this.requireSession(),
+    });
+    this.trackDay(d);
+    return d;
+  }
+
+  async openDay(openingFloatPaise: Paise): Promise<DaySession> {
+    const d = await this.rpc<DaySession & { lastToken: number }>("pos_open_day", {
+      p_session: this.requireSession(),
+      p_opening_float_paise: openingFloatPaise,
+    });
+    this.trackDay(d);
+    return d;
+  }
+
+  async closeDay(input: CloseDayInput): Promise<DaySession> {
+    const d = await this.rpc<DaySession>("pos_close_day", {
+      p_session: this.requireSession(),
+      p_counted_cash_paise: input.countedCashPaise,
+      p_leftovers: input.leftovers,
+    });
+    this.dayId = null;
+    return d;
+  }
+
+  async nextBillNumber(): Promise<{ billNo: string; token: number }> {
+    if (!this.deviceId || !this.deviceCode) throw new StoreError("App not loaded.", "invalid");
+    if (!this.dayId) throw new StoreError("Open the day first.", "no_open_day");
+    const seq = Number(this.storage?.getItem(SEQ_KEY(this.deviceId)) ?? 0) + 1;
+    const token = Number(this.storage?.getItem(TOKEN_KEY(this.dayId)) ?? 0) + 1;
+    this.storage?.setItem(SEQ_KEY(this.deviceId), String(seq));
+    this.storage?.setItem(TOKEN_KEY(this.dayId), String(token));
+    return { billNo: formatBillNo(this.deviceCode, seq), token };
+  }
+
+  async submitOrder(order: Order): Promise<void> {
+    await this.rpc("pos_submit_order", { p_session: this.requireSession(), p_order: order });
+  }
+
+  async listOrders(daySessionId: string): Promise<Order[]> {
+    return this.rpc<Order[]>("pos_list_orders", { p_session: this.requireSession(), p_day: daySessionId });
+  }
+
+  async voidOrder(orderId: string, reason: string, approverPin: string | null): Promise<void> {
+    const r = await this.rpc<{ error?: string }>("pos_void_order", {
+      p_session: this.requireSession(),
+      p_order: orderId,
+      p_reason: reason,
+      p_approver_pin: approverPin,
+    });
+    if (r?.error === "owner_pin") throw new StoreError("That is not the owner PIN.", "not_allowed");
+  }
+
+  async addExpense(e: Omit<Expense, "id" | "createdAt" | "staffId" | "staffName" | "daySessionId">): Promise<Expense> {
+    return this.rpc<Expense>("pos_add_expense", {
+      p_session: this.requireSession(),
+      p_category: e.category,
+      p_amount_paise: e.amountPaise,
+      p_method: e.method,
+      p_note: e.note,
+    });
+  }
+
+  async listExpenses(daySessionId: string): Promise<Expense[]> {
+    return this.rpc<Expense[]>("pos_list_expenses", { p_session: this.requireSession(), p_day: daySessionId });
+  }
+
+  async addCashMovement(
+    m: Omit<CashMovement, "id" | "createdAt" | "staffId" | "staffName" | "daySessionId">,
+  ): Promise<CashMovement> {
+    return this.rpc<CashMovement>("pos_add_cash_movement", {
+      p_session: this.requireSession(),
+      p_direction: m.direction,
+      p_amount_paise: m.amountPaise,
+      p_reason: m.reason,
+    });
+  }
+
+  async listCashMovements(daySessionId: string): Promise<CashMovement[]> {
+    return this.rpc<CashMovement[]>("pos_list_cash_movements", { p_session: this.requireSession(), p_day: daySessionId });
+  }
+
+  async setSoldOut(sellableId: string, soldOut: boolean): Promise<void> {
+    await this.rpc("pos_set_sold_out", { p_session: this.requireSession(), p_ref: sellableId, p_sold_out: soldOut });
+  }
+
+  private trackDay(d: (DaySession & { lastToken?: number }) | null): void {
+    this.dayId = d?.id ?? null;
+    if (d && this.storage) {
+      const local = Number(this.storage.getItem(TOKEN_KEY(d.id)) ?? 0);
+      this.storage.setItem(TOKEN_KEY(d.id), String(Math.max(local, d.lastToken ?? 0)));
+    }
+  }
+
+  private requireSession(): string {
+    if (!this.session) throw new StoreError("Please log in with your PIN.", "no_session");
+    return this.session;
+  }
+
+  private async rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.url}/rest/v1/rpc/${fn}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: this.anonKey,
+          Authorization: `Bearer ${this.anonKey}`,
+        },
+        body: JSON.stringify(args),
+      });
+    } catch {
+      throw new StoreError("No internet connection. Check Wi-Fi and try again.", "network");
+    }
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      const hint = body?.hint as StoreErrorCode | undefined;
+      const code = hint && KNOWN_CODES.includes(hint) ? hint : res.status >= 500 ? "network" : "invalid";
+      if (code === "no_session") this.session = null;
+      throw new StoreError(body?.message ?? `Server error (${res.status}).`, code);
+    }
+    return body as T;
+  }
+}
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}

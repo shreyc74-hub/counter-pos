@@ -2,7 +2,7 @@ import { businessDate, computeDayTotals, formatBillNo } from "@/lib/domain/billi
 import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
 import { demoMenu, demoOutlet, demoStaff } from "./demoMenu";
-import { type Bootstrap, type CloseDayInput, type PosStore, StoreError } from "./store";
+import { type Bootstrap, type CloseDayInput, type OwnerApproval, type PosStore, StoreError } from "./store";
 
 interface DemoState {
   days: DaySession[];
@@ -45,7 +45,12 @@ export class DemoStore implements PosStore {
     return this.staff;
   }
 
-  async verifyOwnerPin(pin: string): Promise<Staff | null> {
+  async approveAsOwner(pin: string): Promise<OwnerApproval | null> {
+    const s = this.owner(pin);
+    return s ? { name: s.name, approvalToken: "demo-approval" } : null;
+  }
+
+  private owner(pin: string): Staff | null {
     const s = demoStaff.find((x) => x.pin === pin && x.role === "owner");
     return s ? { id: s.id, name: s.name, role: s.role } : null;
   }
@@ -133,7 +138,7 @@ export class DemoStore implements PosStore {
     if (!reason.trim()) throw new StoreError("A reason is required.", "invalid");
     let approvedBy: string | null = null;
     if (staff.role !== "owner") {
-      const owner = approverPin ? await this.verifyOwnerPin(approverPin) : null;
+      const owner = approverPin ? this.owner(approverPin) : null;
       if (!owner) throw new StoreError("Owner PIN required to void.", "not_allowed");
       approvedBy = owner.name;
     }

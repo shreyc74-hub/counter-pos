@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "@/lib/data";
-import type { Bootstrap } from "@/lib/data/store";
+import { type Bootstrap, StoreError } from "@/lib/data/store";
 import { computeDayTotals } from "@/lib/domain/billing";
 import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
 import { formatRupees } from "@/lib/domain/money";
@@ -26,7 +26,7 @@ export function CounterApp() {
   const store = useMemo(() => createStore(), []);
   const svc = usePrinter();
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [bootError, setBootError] = useState<string | null>(null);
+  const [bootError, setBootError] = useState<{ message: string; code: string | null } | null>(null);
   const [staff, setStaff] = useState<Staff | null>(null);
   const [day, setDay] = useState<DaySession | null>(null);
   const [dayLoaded, setDayLoaded] = useState(false);
@@ -42,15 +42,17 @@ export function CounterApp() {
   const [cartKey, setCartKey] = useState(0);
   const clearToast = useCallback(() => setToast(null), []);
 
-  useEffect(() => {
+  const loadApp = useCallback(() => {
+    setBootError(null);
     store
       .load()
       .then((b) => {
         setBoot(b);
         setSoldOut(new Set(b.soldOut));
       })
-      .catch((e) => setBootError(errorText(e)));
+      .catch((e) => setBootError({ message: errorText(e), code: e instanceof StoreError ? e.code : null }));
   }, [store]);
+  useEffect(loadApp, [loadApp]);
 
   const refreshDay = useCallback(async () => {
     const d = await store.currentDay();
@@ -95,9 +97,23 @@ export function CounterApp() {
   const nextToken = useMemo(() => (orders.length ? Math.max(...orders.map((o) => o.token)) + 1 : 1), [orders]);
 
   if (bootError) {
+    if (bootError.code === "no_device" && store.setDeviceKey) {
+      return (
+        <DeviceSetup
+          message={bootError.message}
+          onSave={(key) => {
+            store.setDeviceKey?.(key);
+            loadApp();
+          }}
+        />
+      );
+    }
     return (
-      <main className="page">
-        <div className="error">Could not start: {bootError}</div>
+      <main className="page stack" style={{ maxWidth: 560, margin: "0 auto" }}>
+        <div className="error">Could not start: {bootError.message}</div>
+        <button type="button" className="btn btn-dark btn-big" onClick={loadApp}>
+          Try again
+        </button>
       </main>
     );
   }
@@ -223,7 +239,7 @@ export function CounterApp() {
           staff={staff}
           soldOut={soldOut}
           nextToken={nextToken}
-          verifyOwnerPin={(pin) => store.verifyOwnerPin(pin)}
+          approveAsOwner={(pin) => store.approveAsOwner(pin)}
           notify={setToast}
           onToggleSoldOut={async (id, out) => {
             setSoldOut((s) => {
@@ -336,5 +352,33 @@ export function CounterApp() {
 
       <Toast message={toast} onDone={clearToast} />
     </div>
+  );
+}
+
+function DeviceSetup({ message, onSave }: { message: string; onSave: (key: string) => void }) {
+  const [key, setKey] = useState("");
+  return (
+    <main className="page" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100dvh" }}>
+      <form
+        className="card stack"
+        style={{ width: "min(520px, 100%)", gap: 16 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (key.trim()) onSave(key);
+        }}
+      >
+        <h1 style={{ fontSize: 24 }}>Set up this counter</h1>
+        <p className="muted" style={{ margin: 0 }}>
+          {message} The owner gets a device key when registering a tablet. It is entered once per tablet.
+        </p>
+        <label className="field">
+          Device key
+          <input className="input" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" autoFocus />
+        </label>
+        <button type="submit" className="btn btn-dark btn-big" disabled={!key.trim()}>
+          Connect
+        </button>
+      </form>
+    </main>
   );
 }

@@ -17,7 +17,8 @@ import {
 import { formatRupees, rupeesToPaise } from "@/lib/domain/money";
 import type { Channel, Discount, Item, Menu, Modifier, OrderLine, Outlet, Payment, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
-import { PinPad, Sheet } from "./ui";
+import type { OwnerApproval } from "@/lib/data/store";
+import { PinPad, Sheet, errorText } from "./ui";
 
 export interface OrderDraft {
   lines: OrderLine[];
@@ -34,7 +35,7 @@ interface Props {
   soldOut: Set<string>;
   nextToken: number | null;
   onToggleSoldOut: (sellableId: string, soldOut: boolean) => void;
-  verifyOwnerPin: (pin: string) => Promise<Staff | null>;
+  approveAsOwner: (pin: string) => Promise<OwnerApproval | null>;
   /** Saves the bill. Resolves once it is stored. */
   onSubmit: (draft: OrderDraft, payments: Payment[]) => Promise<boolean>;
   notify: (msg: string) => void;
@@ -284,7 +285,7 @@ export function OrderScreen(props: Props) {
           staff={props.staff}
           limit={props.outlet.cashierDiscountLimitPaise}
           current={discount}
-          verifyOwnerPin={props.verifyOwnerPin}
+          approveAsOwner={props.approveAsOwner}
           onClose={() => setShowDiscount(false)}
           onApply={(d) => {
             setDiscount(d);
@@ -528,7 +529,7 @@ function DiscountSheet({
   staff,
   limit,
   current,
-  verifyOwnerPin,
+  approveAsOwner,
   onClose,
   onApply,
 }: {
@@ -536,7 +537,7 @@ function DiscountSheet({
   staff: Staff;
   limit: number;
   current: Discount | null;
-  verifyOwnerPin: (pin: string) => Promise<Staff | null>;
+  approveAsOwner: (pin: string) => Promise<OwnerApproval | null>;
   onClose: () => void;
   onApply: (d: Discount | null) => void;
 }) {
@@ -571,9 +572,13 @@ function DiscountSheet({
             light
             error={pinError}
             onSubmit={async (pin) => {
-              const owner = await verifyOwnerPin(pin);
-              if (!owner) return setPinError("That is not the owner PIN.");
-              onApply({ amountPaise: amount, reason: reason.trim(), approvedBy: owner.name });
+              try {
+                const ok = await approveAsOwner(pin);
+                if (!ok) return setPinError("That is not the owner PIN.");
+                onApply({ amountPaise: amount, reason: reason.trim(), approvedBy: ok.name, approvalToken: ok.approvalToken });
+              } catch (e) {
+                setPinError(errorText(e));
+              }
             }}
           />
         </div>

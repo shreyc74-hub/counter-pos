@@ -111,6 +111,8 @@ export interface Discount {
   amountPaise: Paise;
   reason: string;
   approvedBy: string | null;
+  /** Single-use owner approval from the backend, for discounts above the cashier limit. */
+  approvalToken?: string | null;
 }
 
 export interface Payment {
