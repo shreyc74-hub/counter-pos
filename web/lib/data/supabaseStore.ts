@@ -189,7 +189,9 @@ export class SupabaseStore implements PosStore {
         headers: {
           "Content-Type": "application/json",
           apikey: this.anonKey,
-          Authorization: `Bearer ${this.anonKey}`,
+          // Legacy anon keys are JWTs and also go in Authorization. Newer "publishable"
+          // keys (sb_publishable_…) must only be sent as apikey.
+          ...(this.anonKey.startsWith("eyJ") ? { Authorization: `Bearer ${this.anonKey}` } : {}),
         },
         body: JSON.stringify(args),
       });
