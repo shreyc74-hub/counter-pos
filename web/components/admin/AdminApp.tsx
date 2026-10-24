@@ -108,6 +108,7 @@ function SignIn({ store, onSignedIn }: { store: ReturnType<typeof createAdminSto
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useEmail, setUseEmail] = useState(false);
 
   if (store.kind === "demo") {
     return (
@@ -133,6 +134,10 @@ function SignIn({ store, onSignedIn }: { store: ReturnType<typeof createAdminSto
         </div>
       </main>
     );
+  }
+
+  if (!useEmail && store.deviceChoices) {
+    return <DeviceSignIn store={store} onSignedIn={onSignedIn} onUseEmail={() => setUseEmail(true)} />;
   }
 
   return (
@@ -185,6 +190,92 @@ function SignIn({ store, onSignedIn }: { store: ReturnType<typeof createAdminSto
             Use a different email
           </button>
         ) : null}
+        {store.deviceChoices ? (
+          <button type="button" className="btn" onClick={() => setUseEmail(false)}>
+            Sign in with a device key instead
+          </button>
+        ) : null}
+      </form>
+    </main>
+  );
+}
+
+function DeviceSignIn({
+  store,
+  onSignedIn,
+  onUseEmail,
+}: {
+  store: ReturnType<typeof createAdminStore>;
+  onSignedIn: (u: string) => void;
+  onUseEmail: () => void;
+}) {
+  const [choices, setChoices] = useState<{ code: string; name: string; outlet: string }[] | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    store
+      .deviceChoices?.()
+      .then(setChoices)
+      .catch((e) => {
+        setChoices([]);
+        setError(e instanceof Error ? e.message : "Could not load devices.");
+      });
+  }, [store]);
+
+  return (
+    <main className="page" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100dvh" }}>
+      <form
+        className="card stack"
+        style={{ width: "min(440px, 100%)", gap: 16 }}
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!key.trim()) return;
+          setBusy(true);
+          setError(null);
+          try {
+            if (await store.signInWithDevice?.(key)) onSignedIn((await store.currentUser()) ?? "Owner");
+            else setError("That device key isn't right.");
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Could not sign in.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h1 style={{ fontSize: 24 }}>Admin sign in</h1>
+        {!picked ? (
+          <>
+            <p className="muted" style={{ margin: 0 }}>
+              {choices?.[0]?.outlet ? `${choices[0].outlet}: choose` : "Choose"} your device.
+            </p>
+            {choices === null ? <p className="muted">Loading…</p> : null}
+            {(choices ?? []).map((c) => (
+              <button key={c.code} type="button" className="btn btn-dark btn-big" onClick={() => setPicked(c.name)}>
+                {c.name}
+              </button>
+            ))}
+          </>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: 0 }}>Enter the device key for {picked}.</p>
+            <label className="field">
+              Device key
+              <input className="input input-big" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} autoFocus />
+            </label>
+            <button type="submit" className="btn btn-dark btn-big" disabled={busy || !key.trim()}>
+              {busy ? "Please wait…" : "Sign in"}
+            </button>
+            <button type="button" className="btn" onClick={() => setPicked(null)}>
+              Choose a different device
+            </button>
+          </>
+        )}
+        {error ? <div className="error small">{error}</div> : null}
+        <button type="button" className="btn" onClick={onUseEmail}>
+          Sign in with email instead
+        </button>
       </form>
     </main>
   );

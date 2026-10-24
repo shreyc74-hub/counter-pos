@@ -3,6 +3,7 @@ import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/l
 import {
   type Bootstrap,
   type CloseDayInput,
+  type DeviceChoice,
   type OwnerApproval,
   type PosStore,
   StoreError,
@@ -34,6 +35,7 @@ export class SupabaseStore implements PosStore {
   private deviceId: string | null = null;
   private deviceCode: string | null = null;
   private dayId: string | null = null;
+  private autoLoginDevice = false;
 
   constructor(
     private readonly url: string,
@@ -58,7 +60,13 @@ export class SupabaseStore implements PosStore {
   }
 
   async load(): Promise<Bootstrap & { lastBillSeq?: number }> {
-    const b = await this.rpc<Bootstrap & { lastBillSeq: number }>("pos_bootstrap", { p_device_key: this.deviceKey() });
+    const b = await this.rpc<(Bootstrap & { lastBillSeq: number }) | { error: string }>("pos_bootstrap", {
+      p_device_key: this.deviceKey(),
+    });
+    if ("error" in b) {
+      throw new StoreError("That device key isn't right. Choose your device and enter its key again.", "no_device");
+    }
+    this.autoLoginDevice = !!b.autoLogin;
     this.deviceId = b.device.id;
     this.deviceCode = b.device.code;
     // Never go below what the server has already seen from this device.
@@ -68,12 +76,29 @@ export class SupabaseStore implements PosStore {
   }
 
   async login(pin: string): Promise<Staff | null> {
-    const r = await this.rpc<{ session: string; staff: Staff } | null>("pos_login", {
+    const r = await this.rpc<{ session: string; staff: Staff } | { error: string } | null>("pos_login", {
       p_device_key: this.deviceKey(),
       p_pin: pin,
     });
+    if (r && "error" in r) throw new StoreError("This device's key is no longer valid. Set it up again.", "no_device");
     this.session = r?.session ?? null;
     return r?.staff ?? null;
+  }
+
+  async deviceChoices(): Promise<DeviceChoice[]> {
+    return this.rpc<DeviceChoice[]>("pos_device_choices", {});
+  }
+
+  async autoLogin(): Promise<Staff | null> {
+    const r = await this.rpc<{ session: string; staff: Staff } | { error: string }>("pos_device_login", {
+      p_device_key: this.deviceKey(),
+    });
+    if ("error" in r) {
+      if (r.error === "no_device") throw new StoreError("That device key isn't right. Choose your device and enter its key again.", "no_device");
+      return null; // this device needs a PIN
+    }
+    this.session = r.session;
+    return r.staff;
   }
 
   async approveAsOwner(pin: string): Promise<OwnerApproval | null> {
@@ -187,7 +212,20 @@ export class SupabaseStore implements PosStore {
     return this.session;
   }
 
-  private async rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  private async rpc<T>(fn: string, args: Record<string, unknown>, retried = false): Promise<T> {
+    try {
+      return await this.rpcOnce<T>(fn, args);
+    } catch (e) {
+      // A device that signs in by key just signs in again when its session runs out (e.g. overnight).
+      if (!retried && e instanceof StoreError && e.code === "no_session" && this.autoLoginDevice && "p_session" in args) {
+        await this.autoLogin();
+        return this.rpc<T>(fn, { ...args, p_session: this.session }, true);
+      }
+      throw e;
+    }
+  }
+
+  private async rpcOnce<T>(fn: string, args: Record<string, unknown>): Promise<T> {
     let res: Response;
     try {
       res = await fetch(`${this.url}/rest/v1/rpc/${fn}`, {
@@ -216,7 +254,7 @@ export class SupabaseStore implements PosStore {
       // PostgREST: function not found → the SQL setup files haven't been run in this project yet.
       if (body?.code === "PGRST202" || res.status === 404) {
         throw new StoreError(
-          "Connected to Supabase, but the database isn't set up yet. In Supabase → SQL Editor, run the setup files listed in the README (3 migrations, then street-heaven.sql).",
+          "Connected to Supabase, but the database isn't set up (or is missing the latest update). In Supabase → SQL Editor, run supabase/setup/all-in-one.sql, or the newest migration file if you ran it before.",
           "invalid",
         );
       }

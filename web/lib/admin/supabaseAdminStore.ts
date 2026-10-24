@@ -2,6 +2,15 @@ import type { Outlet } from "@/lib/domain/types";
 import type { AdminMenu, AdminStore, Facts, OrderFact, PricePoint } from "./types";
 
 const SESSION_KEY = "cpos.admin.session";
+const DEVICE_SESSION_KEY = "cpos.admin.deviceSession";
+/** Set by the counter app on this phone/browser; lets the admin panel open without a second sign-in. */
+const COUNTER_DEVICE_KEY = "cpos.deviceKey";
+
+interface DeviceSession {
+  session: string;
+  name: string;
+  key: string;
+}
 
 interface AuthSession {
   accessToken: string;
@@ -14,9 +23,10 @@ interface AuthSession {
 type OrderRow = [string, number, string, string, OrderFact["channel"], number, number, number, number, number, boolean, string | null, [string, "variant" | "combo", number, number, number | null][] | null];
 
 /**
- * Admin panel backed by Supabase. The owner signs in with Supabase Auth (email link
- * or 6-digit code); every call then runs as that user and the admin_* functions check
- * they own the outlet.
+ * Admin panel backed by Supabase. Two ways in:
+ * - a device key (the same devices as the counter; only devices linked to the owner), or
+ * - Supabase Auth email sign-in (link or 6-digit code).
+ * The admin_* functions check the caller owns the outlet either way.
  */
 export class SupabaseAdminStore implements AdminStore {
   readonly kind = "supabase" as const;
@@ -29,8 +39,32 @@ export class SupabaseAdminStore implements AdminStore {
   }
 
   async currentUser(): Promise<string | null> {
+    const d = this.loadDevice();
+    if (d) return d.name;
     const s = await this.session();
-    return s?.email ?? null;
+    if (s) return s.email;
+    // Same phone as the counter: reuse its device key.
+    const counterKey = typeof window !== "undefined" ? window.localStorage.getItem(COUNTER_DEVICE_KEY) : null;
+    if (counterKey && (await this.signInWithDevice(counterKey).catch(() => false))) return this.loadDevice()?.name ?? null;
+    return null;
+  }
+
+  async deviceChoices(): Promise<{ code: string; name: string; outlet: string }[]> {
+    return this.anonRpc("pos_device_choices", {});
+  }
+
+  async signInWithDevice(key: string): Promise<boolean> {
+    const r = await this.anonRpc<{ session: string; staff: { name: string; role: string }; device: { name: string } } | { error: string }>(
+      "pos_device_login",
+      { p_device_key: key.trim() },
+    );
+    if ("error" in r) return false;
+    if (r.staff.role !== "owner") throw new Error("This device isn't linked to the owner, so it can't open the admin panel.");
+    window.localStorage.setItem(
+      DEVICE_SESSION_KEY,
+      JSON.stringify({ session: r.session, name: `${r.staff.name} · ${r.device.name}`, key: key.trim() } satisfies DeviceSession),
+    );
+    return true;
   }
 
   async startSignIn(email: string): Promise<void> {
@@ -61,6 +95,7 @@ export class SupabaseAdminStore implements AdminStore {
   }
 
   async signOut(): Promise<void> {
+    window.localStorage.removeItem(DEVICE_SESSION_KEY);
     const s = this.load();
     window.localStorage.removeItem(SESSION_KEY);
     if (s) await fetch(`${this.url}/auth/v1/logout`, { method: "POST", headers: this.headers(s.accessToken) }).catch(() => undefined);
@@ -187,6 +222,40 @@ export class SupabaseAdminStore implements AdminStore {
     window.history.replaceState(null, "", window.location.pathname);
   }
 
+  private loadDevice(): DeviceSession | null {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(DEVICE_SESSION_KEY) : null;
+      return raw ? (JSON.parse(raw) as DeviceSession) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Calls a function as the app itself (no user sign-in). */
+  private async anonRpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.url}/rest/v1/rpc/${fn}`, { method: "POST", headers: this.anonHeaders(), body: JSON.stringify(args) });
+    } catch {
+      throw new Error(`Can't reach the Supabase server at ${this.url}.`);
+    }
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    if (body?.code === "PGRST202" || res.status === 404) {
+      throw new Error("The database is missing the latest update. In Supabase → SQL Editor, run the newest file in supabase/migrations.");
+    }
+    if (!res.ok) throw new Error(body?.message ?? `Server error (${res.status}).`);
+    return body as T;
+  }
+
+  private anonHeaders(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      apikey: this.anonKey,
+      ...(this.anonKey.startsWith("eyJ") ? { Authorization: `Bearer ${this.anonKey}` } : {}),
+    };
+  }
+
   private load(): AuthSession | null {
     try {
       const raw = window.localStorage.getItem(SESSION_KEY);
@@ -234,6 +303,18 @@ export class SupabaseAdminStore implements AdminStore {
   }
 
   private async rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+    const device = this.loadDevice();
+    if (device) {
+      try {
+        return await this.anonRpc<T>(fn, { ...args, p_session: device.session });
+      } catch (e) {
+        // Device sessions last 16 hours: sign in again with the saved key once, then retry.
+        if (e instanceof Error && /log in again|sign in/i.test(e.message) && (await this.signInWithDevice(device.key).catch(() => false))) {
+          return this.anonRpc<T>(fn, { ...args, p_session: this.loadDevice()!.session });
+        }
+        throw e;
+      }
+    }
     const s = await this.session();
     if (!s) throw new Error("Please sign in again.");
     let res: Response;

@@ -89,3 +89,7 @@ A HYPOTHESIS must never be treated as locked. Changes to a LOCKED item need Shre
 | D-234 | Momos grouped by filling with 8 options (Steamed/Fried/Kurkure/Gravy × Half/Full); noodles/rice dishes have Noodles/Fried Rice × Half/Full | HYPOTHESIS | 23 Oct 2026 | Keeps prep forecast per filling; Favourites give one-tap tiles |
 | D-235 | The "add-on rate" insight tracks Drinks if the menu has them, otherwise Snacks (spring rolls, fries) | HYPOTHESIS | 23 Oct 2026 | Street Heaven has no drinks on the menu |
 | D-236 | Unit tests use a fixed test menu; demo-history tests use the real menu | HYPOTHESIS | 23 Oct 2026 | Price changes never break tests |
+| D-237 | **One-person outlet:** devices are linked to the owner, **Manek**; a device key signs straight in (no PIN, no auto-lock). Two devices: "Shrey" (T1) and "Street Heaven" (T2) | LOCKED | Shrey, 24 Oct 2026 | Keys are set in the database only, never in the repo |
+| D-238 | First screen lists the outlet's devices by name; the user picks one and enters its key once | LOCKED | Shrey, 24 Oct 2026 | |
+| D-239 | Admin panel signs in with the same owner-linked device keys (email sign-in optional) | LOCKED | Shrey, 24 Oct 2026 | Admin functions accept a device session via `p_session` overloads |
+| D-240 | Wrong device keys throttled globally: 10 per hour, then key entry pauses | HYPOTHESIS | 24 Oct 2026 | Needed because the chosen keys are short (6–8 digits); longer keys recommended |

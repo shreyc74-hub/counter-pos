@@ -86,7 +86,7 @@ end $$;
 do $$
 declare b jsonb; s jsonb;
 begin
-  perform test.expect_error($q$select public.pos_bootstrap('wrong-key')$q$, 'no_device');
+  perform test.ok(public.pos_bootstrap('wrong-key')->>'error' = 'no_device', 'unknown device key is refused');
   b := public.pos_bootstrap('demo-t1-key');
   perform test.ok(b#>>'{device,code}' = 'T1', 'bootstrap returns the device');
   perform test.ok(jsonb_array_length(b#>'{menu,favourites}') = 12, 'bootstrap returns 12 favourites');

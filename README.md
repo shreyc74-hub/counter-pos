@@ -63,6 +63,7 @@ receipt screen shows **Retry**.
    costs empty). Its last lines show how to add your email, the tablet's device key and staff PINs.
    Optional, for trying things out: `supabase/seed.sql` adds a separate demo outlet with ~90 days of fake sales.
    (If you use the Supabase CLI: run `supabase init` once, then `supabase link` and `supabase db push`.)
+   **Already ran an earlier version?** Run only the migration files you haven't run yet (e.g. `…04_device_login.sql`).
 3. Add the project URL and the **anon / publishable** key (Supabase → Project settings → API keys)
    as environment variables, in Vercel (Settings → Environment Variables, tick Production, then redeploy)
    or in `web/.env.local` for local runs. Either naming works: `SUPABASE_URL` + `SUPABASE_ANON_KEY`, or
@@ -80,6 +81,19 @@ receipt screen shows **Retry**.
 The menu's source is `web/lib/data/menus/street-heaven.json` (see [`docs/menu.md`](docs/menu.md)).
 If it changes before go-live, edit the JSON and run `node supabase/menus/generate.mjs`.
 After go-live, change prices and costs in the admin panel.
+
+### Devices and sign-in
+
+- Each phone/tablet is a **device** with a name and a key. The first screen lists the
+  outlet's devices by name; pick yours and type its key once (the phone remembers it).
+- A device can be **linked to a person** (`devices.auto_staff_id`): its key signs straight
+  in as them, with no PIN screen and no auto-lock. This is the setup for a one-person
+  outlet. Devices not linked to a person use staff PINs as before.
+- The **admin panel** accepts the same owner-linked devices: on a phone already set up as a
+  counter it opens directly; elsewhere pick the device and type its key. Email sign-in
+  still works too.
+- Wrong device keys are throttled: after 10 wrong keys in an hour, key entry pauses until
+  the hour has passed.
 
 ### What the backend guarantees
 

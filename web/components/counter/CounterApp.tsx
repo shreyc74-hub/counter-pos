@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "@/lib/data";
-import { type Bootstrap, StoreError } from "@/lib/data/store";
+import { type Bootstrap, type DeviceChoice, type PosStore, StoreError } from "@/lib/data/store";
 import { businessDate, computeDayTotals } from "@/lib/domain/billing";
 import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
 import { formatRupees } from "@/lib/domain/money";
@@ -76,10 +76,31 @@ export function CounterApp() {
     setView("order");
   }, [store]);
 
-  // Lock the counter after a few idle minutes so bills are never saved under the wrong name.
+  // Devices linked to one person sign straight in with their key: no PIN screen.
+  const autoLogin = !!boot?.autoLogin && !!store.autoLogin;
+  const [autoLoginFailed, setAutoLoginFailed] = useState(false);
+  useEffect(() => {
+    if (!boot?.autoLogin || !store.autoLogin || staff) return;
+    let cancelled = false;
+    store
+      .autoLogin()
+      .then(async (s) => {
+        if (cancelled) return;
+        if (!s) return setAutoLoginFailed(true);
+        setStaff(s);
+        await refreshDay();
+      })
+      .catch((e) => !cancelled && setBootError({ message: errorText(e), code: e instanceof StoreError ? e.code : null }));
+    return () => {
+      cancelled = true;
+    };
+  }, [boot, store, staff, refreshDay]);
+
+  // Lock the counter after a few idle minutes so bills are never saved under the wrong name
+  // (only when several people share it with PINs).
   const lastActivity = useRef(Date.now());
   useEffect(() => {
-    if (!staff) return;
+    if (!staff || autoLogin) return;
     const bump = () => (lastActivity.current = Date.now());
     window.addEventListener("pointerdown", bump);
     window.addEventListener("keydown", bump);
@@ -91,7 +112,7 @@ export function CounterApp() {
       window.removeEventListener("keydown", bump);
       clearInterval(t);
     };
-  }, [staff, lock, receipt]);
+  }, [staff, lock, receipt, autoLogin]);
 
   const totals = useMemo(() => (day ? computeDayTotals(day, orders, expenses, movements) : null), [day, orders, expenses, movements]);
   const nextToken = useMemo(() => (orders.length ? Math.max(...orders.map((o) => o.token)) + 1 : 1), [orders]);
@@ -100,6 +121,7 @@ export function CounterApp() {
     if (bootError.code === "no_device" && store.setDeviceKey) {
       return (
         <DeviceSetup
+          store={store}
           message={bootError.message}
           onSave={(key) => {
             store.setDeviceKey?.(key);
@@ -131,6 +153,8 @@ export function CounterApp() {
     );
   }
   if (!boot) return <main className="page muted">Loading…</main>;
+
+  if (!staff && autoLogin && !autoLoginFailed) return <main className="page muted">Signing in…</main>;
 
   if (!staff) {
     return (
@@ -341,9 +365,11 @@ export function CounterApp() {
           </button>
         ))}
         <span className="who">{staff.name}</span>
-        <button type="button" className="btn" onClick={lock}>
-          Lock
-        </button>
+        {autoLogin ? null : (
+          <button type="button" className="btn" onClick={lock}>
+            Lock
+          </button>
+        )}
       </nav>
 
       {receipt ? (
@@ -377,8 +403,42 @@ export function CounterApp() {
   );
 }
 
-function DeviceSetup({ message, onSave }: { message: string; onSave: (key: string) => void }) {
+function DeviceSetup({ store, message, onSave }: { store: PosStore; message: string; onSave: (key: string) => void }) {
   const [key, setKey] = useState("");
+  const [choices, setChoices] = useState<DeviceChoice[] | null>(null);
+  const [picked, setPicked] = useState<DeviceChoice | null>(null);
+  useEffect(() => {
+    store
+      .deviceChoices?.()
+      .then((c) => {
+        setChoices(c);
+        if (c.length === 1) setPicked(c[0]);
+      })
+      .catch(() => setChoices([]));
+  }, [store]);
+
+  // Step 1: pick which device this is (the outlet's devices, by name).
+  if (choices && choices.length > 0 && !picked) {
+    return (
+      <main className="page" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100dvh" }}>
+        <div className="card stack" style={{ width: "min(520px, 100%)", gap: 16 }}>
+          <h1 style={{ fontSize: 24 }}>Sign in</h1>
+          <p className="muted" style={{ margin: 0 }}>
+            {choices[0].outlet}: choose your device.
+          </p>
+          {message && !/not set up yet/.test(message) ? <div className="error small">{message}</div> : null}
+          <div className="stack" style={{ gap: 12 }}>
+            {choices.map((c) => (
+              <button key={c.code} type="button" className="btn btn-dark btn-big" onClick={() => setPicked(c)}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="page" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100dvh" }}>
       <form
@@ -389,18 +449,36 @@ function DeviceSetup({ message, onSave }: { message: string; onSave: (key: strin
           if (key.trim()) onSave(key);
         }}
       >
-        <h1 style={{ fontSize: 24 }}>Set up this counter</h1>
-        <p className="muted" style={{ margin: 0 }}>
-          {message} This is <strong>not</strong> a staff PIN: it&apos;s the long key chosen when the tablet was registered in
-          Supabase (setup step 4 in the README). It is entered once per tablet.
-        </p>
+        <h1 style={{ fontSize: 24 }}>{picked ? picked.name : "Set up this counter"}</h1>
+        {picked ? (
+          <p className="muted" style={{ margin: 0 }}>
+            Enter the device key for {picked.name}. This phone remembers it, so it&apos;s only asked once.
+          </p>
+        ) : (
+          <p className="muted" style={{ margin: 0 }}>
+            {message} It&apos;s the key chosen when this device was registered in Supabase. It is entered once per device.
+          </p>
+        )}
+        {picked && message && !/not set up yet/.test(message) ? <div className="error small">{message}</div> : null}
         <label className="field">
           Device key
-          <input className="input" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" autoFocus />
+          <input
+            className="input input-big"
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            autoComplete="off"
+            autoFocus
+          />
         </label>
         <button type="submit" className="btn btn-dark btn-big" disabled={!key.trim()}>
-          Connect
+          Sign in
         </button>
+        {picked && choices && choices.length > 1 ? (
+          <button type="button" className="btn" onClick={() => setPicked(null)}>
+            Choose a different device
+          </button>
+        ) : null}
       </form>
     </main>
   );

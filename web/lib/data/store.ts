@@ -10,12 +10,20 @@ import type {
   Staff,
 } from "@/lib/domain/types";
 
+export interface DeviceChoice {
+  code: string;
+  name: string;
+  outlet: string;
+}
+
 export interface Bootstrap {
   outlet: Outlet;
   device: Device;
   menu: Menu;
   /** Sellable ids currently marked sold out. */
   soldOut: string[];
+  /** The device signs straight in as its linked staff member (no PIN screen). */
+  autoLogin?: boolean;
 }
 
 export interface CloseDayInput {
@@ -32,6 +40,10 @@ export interface PosStore {
   readonly kind: "demo" | "supabase";
   /** Supabase only: the key that registers this tablet as a counter device. */
   setDeviceKey?(key: string): void;
+  /** Supabase only: the outlet's devices by name, for the set-up screen. */
+  deviceChoices?(): Promise<DeviceChoice[]>;
+  /** Supabase only: sign in with just the device key (devices linked to a person). */
+  autoLogin?(): Promise<Staff | null>;
   load(): Promise<Bootstrap>;
   /** Returns the staff member for a PIN, or null. */
   login(pin: string): Promise<Staff | null>;

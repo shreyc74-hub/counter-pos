@@ -133,6 +133,10 @@ export interface AdminStore {
   /** Supabase: email + code. Demo: email is ignored, code is the owner PIN. */
   verifySignIn(email: string, code: string): Promise<boolean>;
   signOut(): Promise<void>;
+  /** Supabase only: the outlet's devices by name (owner devices can open the admin panel). */
+  deviceChoices?(): Promise<{ code: string; name: string; outlet: string }[]>;
+  /** Supabase only: sign in with a device key instead of email. */
+  signInWithDevice?(key: string): Promise<boolean>;
   outlets(): Promise<Outlet[]>;
 
   menu(outletId: string): Promise<AdminMenu>;
