@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "@/lib/data";
 import { type Bootstrap, StoreError } from "@/lib/data/store";
-import { computeDayTotals } from "@/lib/domain/billing";
+import { businessDate, computeDayTotals } from "@/lib/domain/billing";
 import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
 import { formatRupees } from "@/lib/domain/money";
 import type { CashMovement, DaySession, Expense, Order, Payment, Staff } from "@/lib/domain/types";
@@ -220,6 +220,11 @@ export function CounterApp() {
           <span className="muted small">
             Device {boot.device.code} · Day {day.businessDate}
           </span>
+          {day.businessDate !== businessDate() ? (
+            <button type="button" className="btn" style={{ minHeight: 36, background: "var(--warn-bg)", borderColor: "var(--warn-line)" }} onClick={() => setView("day")}>
+              This day was opened on {day.businessDate}. Close it and open today&apos;s
+            </button>
+          ) : null}
         </div>
         {totals ? (
           <div className="row small muted" style={{ flexWrap: "wrap" }}>

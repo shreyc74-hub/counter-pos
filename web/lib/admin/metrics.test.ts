@@ -100,6 +100,16 @@ describe("summarize", () => {
   });
 });
 
+describe("ranges", () => {
+  it("can include a day left open from an earlier date", () => {
+    const f = { days: [day({ date: "2026-10-22", closedAt: null })], orders: [order({})], expenses: [], movements: [], stockOuts: [] };
+    expect(inRange(f, "2026-10-23", "2026-10-23").orders).toHaveLength(0);
+    expect(inRange(f, "2026-10-23", "2026-10-23", true).orders).toHaveLength(1);
+    const closed = { ...f, days: [day({ date: "2026-10-22", closedAt: "x" })] };
+    expect(inRange(closed, "2026-10-23", "2026-10-23", true).orders).toHaveLength(0);
+  });
+});
+
 describe("day and cash", () => {
   it("computes expected drawer cash the same way as the counter", () => {
     const d = day();

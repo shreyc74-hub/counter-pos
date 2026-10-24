@@ -33,8 +33,15 @@ export function weekday(date: string): number {
   return d === 0 ? 7 : d;
 }
 
-export function inRange(f: Facts, from: string, to: string): Facts {
-  const dayIds = new Set(f.days.filter((d) => d.date >= from && d.date <= to).map((d) => d.id));
+/**
+ * Facts for days whose business date is in [from, to]. With includeOpen, a day that is
+ * still open counts too even if it was opened on an earlier date (e.g. never closed
+ * last night), so "Today" never hides sales that are happening now.
+ */
+export function inRange(f: Facts, from: string, to: string, includeOpen = false): Facts {
+  const dayIds = new Set(
+    f.days.filter((d) => (d.date >= from && d.date <= to) || (includeOpen && d.closedAt == null)).map((d) => d.id),
+  );
   return {
     days: f.days.filter((d) => dayIds.has(d.id)),
     orders: f.orders.filter((o) => dayIds.has(o.dayId)),
