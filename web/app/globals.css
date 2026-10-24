@@ -268,7 +268,3 @@ table.data tr.new-row td { background: #fcfbf8; }
 .barlist-note { grid-column: 2; }
 .sharebar { display: flex; gap: 2px; height: 16px; border-radius: 4px; overflow: hidden; }
 .sharebar > span { min-width: 2px; }
-.health { flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
-.health .btn { min-height: 36px; flex: none; }
-.health-bad { background: #fee2e2; border: 2px solid var(--bad); color: #7f1d1d; }
-.health-warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }

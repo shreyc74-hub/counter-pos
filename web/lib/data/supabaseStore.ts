@@ -14,8 +14,6 @@ const DEVICE_KEY = "cpos.deviceKey";
 const SEQ_KEY = (deviceId: string) => `cpos.billSeq.${deviceId}`;
 const TOKEN_KEY = (dayId: string) => `cpos.token.${dayId}`;
 
-const RPC_TIMEOUT_MS = 15_000;
-
 const KNOWN_CODES: StoreErrorCode[] = [
   "no_device",
   "no_session",
@@ -38,8 +36,6 @@ export class SupabaseStore implements PosStore {
   private deviceCode: string | null = null;
   private dayId: string | null = null;
   private autoLoginDevice = false;
-  /** The server has answered at least once, so a later failure is an outage, not a setup problem. */
-  private reached = false;
 
   constructor(
     private readonly url: string,
@@ -82,19 +78,6 @@ export class SupabaseStore implements PosStore {
     return b;
   }
 
-  /** Cheap round trip to check the database is reachable. */
-  async ping(): Promise<void> {
-    await this.rpc("pos_device_choices", {});
-  }
-
-  /** Start from the last snapshot saved on this phone when the database can't be reached. */
-  resumeOffline(boot: Bootstrap, day: DaySession | null): void {
-    this.autoLoginDevice = !!boot.autoLogin;
-    this.deviceId = boot.device.id;
-    this.deviceCode = boot.device.code;
-    this.trackDay(day);
-  }
-
   async login(pin: string): Promise<Staff | null> {
     const r = await this.rpc<{ session: string; staff: Staff } | { error: string } | null>("pos_login", {
       p_device_key: this.deviceKey(),
@@ -128,7 +111,7 @@ export class SupabaseStore implements PosStore {
   }
 
   async approveAsOwner(pin: string): Promise<OwnerApproval | null> {
-    return this.rpc<OwnerApproval | null>("pos_owner_approval", { p_session: await this.sess(), p_pin: pin });
+    return this.rpc<OwnerApproval | null>("pos_owner_approval", { p_session: this.requireSession(), p_pin: pin });
   }
 
   async logout(): Promise<void> {
@@ -139,7 +122,7 @@ export class SupabaseStore implements PosStore {
 
   async currentDay(): Promise<DaySession | null> {
     const d = await this.rpc<(DaySession & { lastToken: number }) | null>("pos_current_day", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
     });
     this.trackDay(d);
     return d;
@@ -147,7 +130,7 @@ export class SupabaseStore implements PosStore {
 
   async openDay(openingFloatPaise: Paise): Promise<DaySession> {
     const d = await this.rpc<DaySession & { lastToken: number }>("pos_open_day", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
       p_opening_float_paise: openingFloatPaise,
     });
     this.trackDay(d);
@@ -156,7 +139,7 @@ export class SupabaseStore implements PosStore {
 
   async closeDay(input: CloseDayInput): Promise<DaySession> {
     const d = await this.rpc<DaySession>("pos_close_day", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
       p_counted_cash_paise: input.countedCashPaise,
       p_leftovers: input.leftovers,
     });
@@ -175,16 +158,16 @@ export class SupabaseStore implements PosStore {
   }
 
   async submitOrder(order: Order): Promise<void> {
-    await this.rpc("pos_submit_order", { p_session: await this.sess(), p_order: order });
+    await this.rpc("pos_submit_order", { p_session: this.requireSession(), p_order: order });
   }
 
   async listOrders(daySessionId: string): Promise<Order[]> {
-    return this.rpc<Order[]>("pos_list_orders", { p_session: await this.sess(), p_day: daySessionId });
+    return this.rpc<Order[]>("pos_list_orders", { p_session: this.requireSession(), p_day: daySessionId });
   }
 
   async voidOrder(orderId: string, reason: string, approverPin: string | null): Promise<void> {
     const r = await this.rpc<{ error?: string }>("pos_void_order", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
       p_order: orderId,
       p_reason: reason,
       p_approver_pin: approverPin,
@@ -194,7 +177,7 @@ export class SupabaseStore implements PosStore {
 
   async addExpense(e: Omit<Expense, "id" | "createdAt" | "staffId" | "staffName" | "daySessionId">): Promise<Expense> {
     return this.rpc<Expense>("pos_add_expense", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
       p_category: e.category,
       p_amount_paise: e.amountPaise,
       p_method: e.method,
@@ -203,14 +186,14 @@ export class SupabaseStore implements PosStore {
   }
 
   async listExpenses(daySessionId: string): Promise<Expense[]> {
-    return this.rpc<Expense[]>("pos_list_expenses", { p_session: await this.sess(), p_day: daySessionId });
+    return this.rpc<Expense[]>("pos_list_expenses", { p_session: this.requireSession(), p_day: daySessionId });
   }
 
   async addCashMovement(
     m: Omit<CashMovement, "id" | "createdAt" | "staffId" | "staffName" | "daySessionId">,
   ): Promise<CashMovement> {
     return this.rpc<CashMovement>("pos_add_cash_movement", {
-      p_session: await this.sess(),
+      p_session: this.requireSession(),
       p_direction: m.direction,
       p_amount_paise: m.amountPaise,
       p_reason: m.reason,
@@ -218,11 +201,11 @@ export class SupabaseStore implements PosStore {
   }
 
   async listCashMovements(daySessionId: string): Promise<CashMovement[]> {
-    return this.rpc<CashMovement[]>("pos_list_cash_movements", { p_session: await this.sess(), p_day: daySessionId });
+    return this.rpc<CashMovement[]>("pos_list_cash_movements", { p_session: this.requireSession(), p_day: daySessionId });
   }
 
   async setSoldOut(sellableId: string, soldOut: boolean): Promise<void> {
-    await this.rpc("pos_set_sold_out", { p_session: await this.sess(), p_ref: sellableId, p_sold_out: soldOut });
+    await this.rpc("pos_set_sold_out", { p_session: this.requireSession(), p_ref: sellableId, p_sold_out: soldOut });
   }
 
   private trackDay(d: (DaySession & { lastToken?: number }) | null): void {
@@ -231,12 +214,6 @@ export class SupabaseStore implements PosStore {
       const local = Number(this.storage.getItem(TOKEN_KEY(d.id)) ?? 0);
       this.storage.setItem(TOKEN_KEY(d.id), String(Math.max(local, d.lastToken ?? 0)));
     }
-  }
-
-  /** The session token; a key-only device signs in again first if it has none (e.g. after starting offline). */
-  private async sess(): Promise<string> {
-    if (!this.session && this.autoLoginDevice) await this.autoLogin();
-    return this.requireSession();
   }
 
   private requireSession(): string {
@@ -259,14 +236,9 @@ export class SupabaseStore implements PosStore {
 
   private async rpcOnce<T>(fn: string, args: Record<string, unknown>): Promise<T> {
     let res: Response;
-    let text: string;
-    // A hung request must not freeze the counter: give up after a while and report it.
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), RPC_TIMEOUT_MS);
     try {
       res = await fetch(`${this.url}/rest/v1/rpc/${fn}`, {
         method: "POST",
-        signal: abort.signal,
         headers: {
           "Content-Type": "application/json",
           apikey: this.anonKey,
@@ -276,31 +248,17 @@ export class SupabaseStore implements PosStore {
         },
         body: JSON.stringify(args),
       });
-      text = await res.text();
-      this.reached = true;
     } catch {
-      if (abort.signal.aborted) {
-        throw new StoreError("The database is taking too long to answer (slow or no internet).", "network");
-      }
       const online = typeof navigator === "undefined" || navigator.onLine;
       throw new StoreError(
-        !online
-          ? "No internet connection. Check Wi-Fi / mobile data."
-          : this.reached
-            ? "Can't reach the database right now (weak internet, or Supabase is down)."
-            : `Can't reach the Supabase server at ${this.url}. Check that the URL setting in Vercel is your Supabase Project URL (looks like https://abcd1234.supabase.co), then redeploy.`,
+        online
+          ? `Can't reach the Supabase server at ${this.url}. Check that the URL setting in Vercel is your Supabase Project URL (looks like https://abcd1234.supabase.co), then redeploy.`
+          : "No internet connection. Check Wi-Fi and try again.",
         "network",
       );
-    } finally {
-      clearTimeout(timer);
     }
-    let body: { code?: string; hint?: string; message?: string } | null = null;
-    try {
-      body = text ? JSON.parse(text) : null;
-    } catch {
-      // Not JSON (e.g. a gateway error page): treat as the server being unavailable.
-      if (res.ok) throw new StoreError("The database sent an unreadable answer. Try again.", "network");
-    }
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
     if (!res.ok) {
       // PostgREST: function not found → the SQL setup files haven't been run in this project yet.
       if (body?.code === "PGRST202" || res.status === 404) {
@@ -314,7 +272,7 @@ export class SupabaseStore implements PosStore {
       if (code === "no_session") this.session = null;
       throw new StoreError(body?.message ?? `Server error (${res.status}).`, code);
     }
-    return body as unknown as T;
+    return body as T;
   }
 }
 

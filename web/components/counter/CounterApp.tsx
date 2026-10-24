@@ -1,9 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type BackupStatus, SheetsBackup, billRows, dayRow, describeBackup, eventRow, expenseRow, movementRow } from "@/lib/backup/sheets";
 import { createStore } from "@/lib/data";
-import { type UnsavedBill, UnsavedBills, clearSnapshot, loadSnapshot, mergeUnsaved, saveSnapshot } from "@/lib/data/offline";
 import { type Bootstrap, type DeviceChoice, type PosStore, StoreError } from "@/lib/data/store";
 import { businessDate, computeDayTotals } from "@/lib/domain/billing";
 import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
@@ -23,7 +21,6 @@ import { Sheet, Toast, errorText, usePrinter } from "./ui";
 type View = "order" | "orders" | "expense" | "day" | "printer";
 
 const IDLE_LOCK_MS = 5 * 60 * 1000;
-const HEALTH_CHECK_MS = 30_000;
 
 export function CounterApp() {
   const store = useMemo(() => createStore(), []);
@@ -39,18 +36,7 @@ export function CounterApp() {
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [soldOut, setSoldOut] = useState<Set<string>>(new Set());
   const [receipt, setReceipt] = useState<{ order: Order; jobId: string | null } | null>(null);
-  const [failedSave, setFailedSave] = useState<{ order: Order; error: string; canKeep: boolean } | null>(null);
-  // Bills printed while the database was unreachable, kept on this phone until it confirms them.
-  const unsavedStore = useMemo(() => new UnsavedBills(), []);
-  const [unsaved, setUnsaved] = useState(() => unsavedStore.list());
-  const unsavedIds = useMemo(() => new Set(unsaved.map((b) => b.order.id)), [unsaved]);
-  // Copy of everything into the owner's Google Sheet.
-  const backup = useMemo(() => new SheetsBackup(), []);
-  const [backupStatus, setBackupStatus] = useState<BackupStatus>(() => backup.getStatus());
-  useEffect(() => backup.subscribe(setBackupStatus), [backup]);
-  // False while the database can't be reached. `offline`: started from this phone's last snapshot.
-  const [dbOk, setDbOk] = useState(true);
-  const [offline, setOffline] = useState(false);
+  const [failedSave, setFailedSave] = useState<{ order: Order; error: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Remounting the order screen empties its cart (used after a retried save succeeds).
   const [cartKey, setCartKey] = useState(0);
@@ -64,37 +50,17 @@ export function CounterApp() {
         setBoot(b);
         setSoldOut(new Set(b.soldOut));
       })
-      .catch((e) => {
-        // Database unreachable on start: carry on from what this phone last showed, so billing
-        // never stops. Bills made now are kept on the phone and saved once it's back.
-        const snap = e instanceof StoreError && e.code === "network" ? loadSnapshot() : null;
-        if (snap && snap.boot.autoLogin && store.resumeOffline) {
-          store.resumeOffline(snap.boot, snap.day);
-          setBoot(snap.boot);
-          setSoldOut(new Set(snap.boot.soldOut));
-          setStaff(snap.staff);
-          setDay(snap.day);
-          setOrders(mergeUnsaved(snap.orders, unsavedStore.list(), snap.day.id));
-          setExpenses(snap.expenses);
-          setMovements(snap.movements);
-          setDayLoaded(true);
-          setOffline(true);
-          setDbOk(false);
-          return;
-        }
-        setBootError({ message: errorText(e), code: e instanceof StoreError ? e.code : null });
-      });
-  }, [store, unsavedStore]);
+      .catch((e) => setBootError({ message: errorText(e), code: e instanceof StoreError ? e.code : null }));
+  }, [store]);
   useEffect(loadApp, [loadApp]);
 
   const refreshDay = useCallback(async () => {
     const d = await store.currentDay();
     setDay(d);
     setDayLoaded(true);
-    setDbOk(true);
     if (d) {
       const [o, e, m] = await Promise.all([store.listOrders(d.id), store.listExpenses(d.id), store.listCashMovements(d.id)]);
-      setOrders(mergeUnsaved(o, unsavedStore.list(), d.id));
+      setOrders(o);
       setExpenses(e);
       setMovements(m);
     } else {
@@ -102,77 +68,7 @@ export function CounterApp() {
       setExpenses([]);
       setMovements([]);
     }
-  }, [store, unsavedStore]);
-
-  // Remember what the counter shows, for starting up while the database is unreachable.
-  useEffect(() => {
-    if (!boot || !staff || !dayLoaded) return;
-    if (day) saveSnapshot({ boot: { ...boot, soldOut: [...soldOut] }, staff, day, orders, expenses, movements });
-    else clearSnapshot();
-  }, [boot, staff, day, dayLoaded, orders, expenses, movements, soldOut]);
-
-  // Send kept bills to the database, oldest first. Stops at the first network failure.
-  const flushing = useRef(false);
-  const flushUnsaved = useCallback(async () => {
-    if (flushing.current) return;
-    flushing.current = true;
-    try {
-      for (const b of unsavedStore.list()) {
-        if (b.refused) continue;
-        try {
-          await store.submitOrder(b.order);
-        } catch (e) {
-          if (e instanceof StoreError && e.code === "network") {
-            setDbOk(false);
-            return;
-          }
-          setUnsaved(unsavedStore.markRefused(b.order.id, errorText(e)));
-          backup.add([eventRow(`${b.order.id}:refused`, "DATABASE REFUSED A KEPT BILL", b.order.billNo, errorText(e))]);
-          continue;
-        }
-        setDbOk(true);
-        setUnsaved(unsavedStore.remove(b.order.id));
-        backup.add([eventRow(`${b.order.id}:saved-late`, "Kept bill saved to database", b.order.billNo, "")]);
-      }
-    } finally {
-      flushing.current = false;
-    }
-  }, [store, unsavedStore, backup]);
-
-  // Health check: is the database reachable? Also retries kept bills and the sheet backup.
-  useEffect(() => {
-    if (!staff) return;
-    let stopped = false;
-    const check = async () => {
-      void backup.flush();
-      try {
-        await store.ping?.();
-      } catch {
-        if (!stopped) setDbOk(false);
-        return;
-      }
-      if (stopped) return;
-      setDbOk(true);
-      if (unsavedStore.list().some((b) => !b.refused)) await flushUnsaved();
-      if (offline) {
-        try {
-          await refreshDay();
-          setOffline(false);
-        } catch {
-          setDbOk(false);
-        }
-      }
-    };
-    const t = setInterval(() => void check(), HEALTH_CHECK_MS);
-    const onOnline = () => void check();
-    window.addEventListener("online", onOnline);
-    void check();
-    return () => {
-      stopped = true;
-      clearInterval(t);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [staff, store, backup, unsavedStore, flushUnsaved, offline, refreshDay]);
+  }, [store]);
 
   const lock = useCallback(() => {
     void store.logout();
@@ -287,8 +183,7 @@ export function CounterApp() {
           staff={staff}
           onLock={lock}
           onOpen={async (floatPaise) => {
-            const opened = await store.openDay(floatPaise);
-            backup.add([dayRow(opened, "opened", boot.device.code)]);
+            await store.openDay(floatPaise);
             await refreshDay();
             setView("order");
           }}
@@ -308,35 +203,15 @@ export function CounterApp() {
     try {
       await store.submitOrder(order);
     } catch (e) {
-      const network = e instanceof StoreError && e.code === "network";
-      if (network) setDbOk(false);
-      setFailedSave({ order, error: errorText(e), canKeep: network });
+      setFailedSave({ order, error: errorText(e) });
       return false;
     }
-    setDbOk(true);
-    backup.add(billRows(order, day.businessDate, true));
-    afterSave(order, isRetry);
-    return true;
-  };
-
-  // Database unreachable: print now, keep the bill on this phone, and save it automatically later.
-  const keepUnsaved = (order: Order) => {
-    try {
-      setUnsaved(unsavedStore.add(order));
-    } catch {
-      setToast("This phone's storage is full, so the bill can't be kept. Write it down and retry.");
-      return;
-    }
-    backup.add(billRows(order, day.businessDate, false));
-    afterSave(order, true);
-  };
-
-  const afterSave = (order: Order, isRetry: boolean) => {
     setFailedSave(null);
     if (isRetry) setCartKey((k) => k + 1);
     setOrders((os) => [order, ...os.filter((o) => o.id !== order.id)]);
     const jobId = svc.getSettings().autoPrint ? printOrder(order) : null;
     setReceipt({ order, jobId });
+    return true;
   };
 
   const submit = async (draft: OrderDraft, payments: Payment[]): Promise<boolean> => {
@@ -400,16 +275,6 @@ export function CounterApp() {
             <span>Drawer {formatRupees(totals.expectedCashPaise)}</span>
           </div>
         ) : null}
-        <HealthBar
-          unsaved={unsaved}
-          dbOk={dbOk}
-          backup={backupStatus}
-          onRetry={() => {
-            void flushUnsaved();
-            void backup.flush();
-          }}
-          onDismissRefused={(id) => setUnsaved(unsavedStore.remove(id))}
-        />
       </header>
 
       {view === "order" ? (
@@ -448,15 +313,9 @@ export function CounterApp() {
             printOrder(o, true);
             setToast(`Reprinting ${o.billNo}`);
           }}
-          unsavedIds={unsavedIds}
           onVoid={async (id, reason, pin) => {
-            if (unsavedIds.has(id)) {
-              throw new Error("This bill hasn't reached the database yet. Void it after it's saved (when the red bar at the top is gone).");
-            }
             await store.voidOrder(id, reason, pin);
-            const voided = orders.find((o) => o.id === id);
-            backup.add([eventRow(`${id}:void`, "Bill voided", voided?.billNo ?? "", reason)]);
-            setOrders(mergeUnsaved(await store.listOrders(day.id), unsavedStore.list(), day.id));
+            setOrders(await store.listOrders(day.id));
             setToast("Bill voided");
           }}
         />
@@ -469,12 +328,10 @@ export function CounterApp() {
           notify={setToast}
           onAddExpense={async (e) => {
             const row = await store.addExpense(e);
-            backup.add([expenseRow(row, day.businessDate)]);
             setExpenses((xs) => [...xs, row]);
           }}
           onAddMovement={async (m) => {
             const row = await store.addCashMovement(m);
-            backup.add([movementRow(row, day.businessDate)]);
             setMovements((xs) => [...xs, row]);
           }}
         />
@@ -489,13 +346,7 @@ export function CounterApp() {
             svc.enqueue("Day report", layoutDayReport(day, totals, boot.outlet, { width: svc.getSettings().width }));
           }}
           onClose={async (counted, leftovers) => {
-            if (unsaved.length) {
-              throw new Error(
-                `${unsaved.length} bill(s) haven't reached the database yet. Close the day once they're saved (red bar at the top).`,
-              );
-            }
             const closed = await store.closeDay({ countedCashPaise: counted, leftovers });
-            backup.add([dayRow(closed, "closed", boot.device.code)]);
             if (svc.getSettings().mode !== "none") {
               svc.enqueue("Day report", layoutDayReport(closed, totals, boot.outlet, { width: svc.getSettings().width }));
             }
@@ -544,17 +395,6 @@ export function CounterApp() {
           <button type="button" className="btn btn-dark btn-big" onClick={() => void saveOrder(failedSave.order, true)}>
             Retry saving {failedSave.order.billNo}
           </button>
-          {failedSave.canKeep ? (
-            <>
-              <button type="button" className="btn btn-big" onClick={() => keepUnsaved(failedSave.order)}>
-                Print now, save to database later
-              </button>
-              <p className="small muted" style={{ margin: 0 }}>
-                The bill is kept on this phone (and sent to the Google Sheet) and saved to the database automatically as soon as it&apos;s
-                reachable. A red bar shows until then.
-              </p>
-            </>
-          ) : null}
         </Sheet>
       ) : null}
 
@@ -641,83 +481,5 @@ function DeviceSetup({ store, message, onSave }: { store: PosStore; message: str
         ) : null}
       </form>
     </main>
-  );
-}
-
-/** Always-visible state of the data: bills not yet in the database, database reachability, sheet backup. */
-function HealthBar({
-  unsaved,
-  dbOk,
-  backup,
-  onRetry,
-  onDismissRefused,
-}: {
-  unsaved: UnsavedBill[];
-  dbOk: boolean;
-  backup: BackupStatus;
-  onRetry: () => void;
-  onDismissRefused: (orderId: string) => void;
-}) {
-  const waiting = unsaved.filter((b) => !b.refused);
-  const refused = unsaved.filter((b) => b.refused);
-  return (
-    <>
-      {waiting.length ? (
-        <div className="health health-bad" role="alert">
-          <span>
-            <strong>
-              {waiting.length} bill{waiting.length === 1 ? "" : "s"} NOT saved to the database yet
-            </strong>{" "}
-            ({waiting.map((b) => b.order.billNo).join(", ")}). Kept on this phone; {dbOk ? "saving now…" : "the database can't be reached, retrying every 30 s."} Don&apos;t
-            clear this browser&apos;s data.
-          </span>
-          <button type="button" className="btn" onClick={onRetry}>
-            Retry now
-          </button>
-        </div>
-      ) : !dbOk ? (
-        <div className="health health-warn" role="alert">
-          <span>
-            <strong>Database not reachable.</strong> You can keep billing: if a bill can&apos;t be saved you&apos;ll be asked, and it&apos;s kept on this
-            phone until the database is back.
-          </span>
-          <button type="button" className="btn" onClick={onRetry}>
-            Check again
-          </button>
-        </div>
-      ) : null}
-      {refused.map((b) => (
-        <div key={b.order.id} className="health health-bad" role="alert">
-          <span>
-            <strong>The database refused bill {b.order.billNo}</strong> ({b.refused}). Note it down: total{" "}
-            {formatRupees(b.order.totalPaise)}. It&apos;s also in the Google Sheet if that&apos;s set up.
-          </span>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (window.confirm(`Remove bill ${b.order.billNo} from this phone? Only do this once you've noted it down.`)) onDismissRefused(b.order.id);
-            }}
-          >
-            Noted, remove
-          </button>
-        </div>
-      ))}
-      {backup.state === "failing" ? (
-        <div className="health health-warn" role="status">
-          <span>
-            <strong>{describeBackup(backup)}.</strong> {backup.error} Rows are kept and sent when it works again.
-          </span>
-          <button type="button" className="btn" onClick={onRetry}>
-            Retry
-          </button>
-        </div>
-      ) : (
-        <span className="small muted" data-testid="backup-status">
-          {describeBackup(backup)}
-          {dbOk ? " · Database connected" : ""}
-        </span>
-      )}
-    </>
   );
 }
