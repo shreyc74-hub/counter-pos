@@ -201,6 +201,13 @@ export class SupabaseStore implements PosStore {
     const text = await res.text();
     const body = text ? JSON.parse(text) : null;
     if (!res.ok) {
+      // PostgREST: function not found → the SQL setup files haven't been run in this project yet.
+      if (body?.code === "PGRST202" || res.status === 404) {
+        throw new StoreError(
+          "Connected to Supabase, but the database isn't set up yet. In Supabase → SQL Editor, run the setup files listed in the README (3 migrations, then street-heaven.sql).",
+          "invalid",
+        );
+      }
       const hint = body?.hint as StoreErrorCode | undefined;
       const code = hint && KNOWN_CODES.includes(hint) ? hint : res.status >= 500 ? "network" : "invalid";
       if (code === "no_session") this.session = null;

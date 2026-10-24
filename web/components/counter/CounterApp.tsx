@@ -215,7 +215,11 @@ export function CounterApp() {
     <div className="screen">
       <header className="topbar">
         <div className="row">
-          {boot.outlet.isDemo ? <span className="badge-demo">DEMO</span> : null}
+          {store.kind === "demo" ? (
+            <span className="badge-demo">DEMO · not connected</span>
+          ) : boot.outlet.isDemo ? (
+            <span className="badge-demo">DEMO OUTLET</span>
+          ) : null}
           <strong>{boot.outlet.name}</strong>
           <span className="muted small">
             Device {boot.device.code} · Day {day.businessDate}

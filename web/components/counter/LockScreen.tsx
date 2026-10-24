@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Bootstrap } from "@/lib/data/store";
 import type { Staff } from "@/lib/domain/types";
+import { supabaseConfig } from "@/lib/supabaseConfig";
 import { PinPad, useClock } from "./ui";
 
 export function LockScreen({
@@ -22,7 +23,13 @@ export function LockScreen({
     <main className="lock">
       <section className="lock-info">
         <div className="row">
-          {boot.outlet.isDemo ? <span className="badge-demo">DEMO</span> : null}
+          {demo ? (
+            <span className="badge-demo">DEMO · not connected to Supabase</span>
+          ) : boot.outlet.isDemo ? (
+            <span className="badge-demo">DEMO OUTLET (Supabase)</span>
+          ) : (
+            <span className="badge-live">LIVE · Supabase</span>
+          )}
           <span style={{ color: "#d6d3cc" }}>
             {boot.outlet.name} · Device {boot.device.code}
           </span>
@@ -36,6 +43,11 @@ export function LockScreen({
             Demo PINs: Shrey (owner) 1234 · Ramesh 1111 · Sita 2222.
             <br />
             Demo data stays in this browser only.
+            <br />
+            <span style={{ color: "#fdba74" }}>
+              Not connected: this version was built without {supabaseConfig().missing.join(" and ")}. Add it in Vercel → Settings →
+              Environment Variables, then redeploy.
+            </span>
           </div>
         ) : (
           <div />

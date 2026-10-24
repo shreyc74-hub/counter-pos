@@ -244,6 +244,9 @@ export class SupabaseAdminStore implements AdminStore {
     }
     const text = await res.text();
     const body = text ? JSON.parse(text) : null;
+    if (body?.code === "PGRST202" || res.status === 404) {
+      throw new Error("Connected to Supabase, but the database isn't set up yet. Run the SQL setup files listed in the README in Supabase → SQL Editor.");
+    }
     if (!res.ok) throw new Error(body?.message ?? `Server error (${res.status}).`);
     return body as T;
   }

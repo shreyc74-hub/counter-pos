@@ -5,6 +5,7 @@ import { PinPad } from "@/components/counter/ui";
 import { createAdminStore } from "@/lib/admin";
 import type { AdminMenu } from "@/lib/admin/types";
 import type { Outlet } from "@/lib/domain/types";
+import { supabaseConfig } from "@/lib/supabaseConfig";
 import { Dashboard } from "./Dashboard";
 import { MenuEditor } from "./MenuEditor";
 
@@ -61,7 +62,12 @@ export function AdminApp() {
           <strong style={{ fontSize: 18 }}>Counter POS</strong>
           {outlet ? (
             <span className="small" style={{ color: "#d6d3cc" }}>
-              {outlet.name} {outlet.isDemo ? <span className="badge-demo" style={{ marginLeft: 4 }}>DEMO</span> : null}
+              {outlet.name}{" "}
+              {store.kind === "demo" ? (
+                <span className="badge-demo" style={{ marginLeft: 4 }}>DEMO · not connected</span>
+              ) : outlet.isDemo ? (
+                <span className="badge-demo" style={{ marginLeft: 4 }}>DEMO OUTLET</span>
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -111,6 +117,10 @@ function SignIn({ store, onSignedIn }: { store: ReturnType<typeof createAdminSto
           <p className="muted" style={{ margin: 0 }}>
             Demo mode runs on made-up data in this browser. Enter the owner PIN (1234).
           </p>
+          <div className="notice small">
+            Not connected to Supabase: this version was built without {supabaseConfig().missing.join(" and ")}. Add it in Vercel →
+            Settings → Environment Variables, then redeploy.
+          </div>
           <PinPad
             light
             error={error}
