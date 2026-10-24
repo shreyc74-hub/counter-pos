@@ -57,7 +57,7 @@ receipt screen shows **Retry**.
 ## Connecting the real backend (Supabase)
 
 1. Create a project at [supabase.com](https://supabase.com) (the free tier is fine for testing).
-2. In the project's **SQL editor**, run the files in order:
+2. In the project's **SQL editor**, paste and run **`supabase/setup/all-in-one.sql`** (everything below in one file), or run the files in order:
    `supabase/migrations/20261023000001_core_schema.sql`, then `…02_pos_api.sql`, then `…03_admin_api.sql`.
    Then **`supabase/setup/street-heaven.sql`**: the real outlet with the full menu and prices (no fake data,
    costs empty). Its last lines show how to add your email, the tablet's device key and staff PINs.

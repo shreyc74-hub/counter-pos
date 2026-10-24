@@ -73,3 +73,4 @@ if (a < 0 || b < 0) throw new Error("MENU markers not found in seed.sql");
 const block = `${start}\n${menuSql((k) => `pg_temp.id(${q(k)})`, "pg_temp.id('outlet')", true, "now() - interval '400 days'")}\n`;
 writeFileSync(seedPath, seed.slice(0, a) + block + seed.slice(b));
 console.log("wrote supabase/setup/street-heaven.sql and the menu block in supabase/seed.sql");
+console.log("now run: node supabase/setup/build-all-in-one.mjs");
