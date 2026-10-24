@@ -147,13 +147,61 @@ h1, h2, h3 { margin: 0; }
 .pay .btn { flex: 1 1 0; min-height: 72px; font-size: 24px; font-weight: 800; border-radius: 16px; }
 .empty-cart { padding: 40px 0; text-align: center; color: var(--muted); }
 
+.menu-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.label-short { display: none; }
+
+/* Phones and tablets in portrait: menu on top, cart below. Same layout, tighter spacing. */
 @media (max-width: 820px) {
   .order { flex-direction: column; }
-  .cart { flex: 0 0 auto; border-left: none; border-top: 1px solid var(--line); max-height: 46dvh; }
-  .tabs { flex-wrap: nowrap; overflow-x: auto; }
-  .tab { white-space: nowrap; }
-  .topbar { min-height: 0; }
+  .cart { flex: 0 0 auto; border-left: none; border-top: 1px solid var(--line); max-height: 50dvh; }
+  .menu-head { flex-wrap: nowrap; gap: 8px; }
+  .menu-head > .btn { flex: none; white-space: nowrap; }
+  .tabs {
+    flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    /* fade at the right edge hints that the tabs scroll sideways */
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  .tab { white-space: nowrap; flex: none; }
+  .topbar { min-height: 0; gap: 2px 12px; padding: 6px 12px; }
   .tiles { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .cart-head { padding: 8px 16px; }
+  .order-type { flex-direction: row; align-items: center; gap: 8px; }
+  .empty-cart { padding: 12px 0; }
+  /* bottom bar: every button visible, equal widths, no sideways scrolling */
+  .bottombar { gap: 6px; padding: 6px 8px; overflow-x: visible; }
+  .bottombar .btn { flex: 1 1 0; min-width: 0; padding: 0 6px; font-size: 14px; white-space: normal; line-height: 1.15; text-align: center; }
+  .bottombar .who { display: none; }
+  .topbar strong, .topbar .small { white-space: nowrap; }
+}
+
+/* Short labels only where space is tight. */
+@media (max-width: 600px) {
+  .label-long { display: none; }
+  .label-short { display: inline; }
+}
+
+/* Phones (5–6.7"): smaller tiles so more of the menu fits on screen. */
+@media (max-width: 560px) {
+  .menu-pane { padding: 10px; gap: 8px; }
+  .tab { min-height: 40px; padding: 0 12px; font-size: 15px; }
+  .menu-head > .btn { min-height: 40px; padding: 0 10px; font-size: 14px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile { min-height: 76px; padding: 8px 10px; gap: 4px; border-radius: 12px; }
+  .tile-name { font-size: 15px; }
+  .tile-sub { font-size: 12px; }
+  .tile-price { font-size: 16px; }
+  .topbar strong { font-size: 15px; }
+  .topbar .small { font-size: 12px; }
+  .cart-head { padding: 6px 12px; }
+  .cart-lines { padding: 0 12px; }
+  .cart-line { padding: 6px 0; gap: 4px; }
+  .qty button { width: 36px; height: 36px; }
+  .cart-foot { padding: 8px 12px 10px; gap: 8px; }
+  .cart-foot .btn { min-height: 40px; }
+  .total strong { font-size: 26px; }
+  .pay .btn { min-height: 56px; font-size: 20px; }
+  .bottombar .btn { font-size: 13px; min-height: 44px; padding: 0 4px; }
 }
 
 /* ---------- sheets / dialogs ---------- */

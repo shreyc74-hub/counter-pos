@@ -240,12 +240,15 @@ export function CounterApp() {
     return saveOrder(order);
   };
 
-  const nav: [View, string][] = [
-    ["order", "New order"],
-    ["orders", `Orders today (${orders.filter((o) => !o.voided).length})`],
-    ["expense", "Expense / cash"],
-    ["day", "Close day"],
-    ["printer", svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed") ? "Printer: failed" : "Printer"],
+  const billCount = orders.filter((o) => !o.voided).length;
+  const printerLabel = svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed") ? "Printer: failed" : "Printer";
+  // [view, label, shorter label for phones]
+  const nav: [View, string, string][] = [
+    ["order", "New order", "New order"],
+    ["orders", `Orders today (${billCount})`, `Orders (${billCount})`],
+    ["expense", "Expense / cash", "Expense"],
+    ["day", "Close day", "Close day"],
+    ["printer", printerLabel, printerLabel],
   ];
 
   return (
@@ -359,9 +362,10 @@ export function CounterApp() {
       {view === "printer" ? <PrinterScreen outlet={boot.outlet} /> : null}
 
       <nav className="bottombar" aria-label="Counter">
-        {nav.map(([v, label]) => (
+        {nav.map(([v, label, short]) => (
           <button key={v} type="button" className="btn" aria-current={view === v ? "page" : undefined} onClick={() => setView(v)}>
-            {label}
+            <span className="label-long">{label}</span>
+            <span className="label-short">{short}</span>
           </button>
         ))}
         <span className="who">{staff.name}</span>

@@ -115,7 +115,7 @@ export function OrderScreen(props: Props) {
   return (
     <div className="order">
       <div className="menu-pane">
-        <div className="row between" style={{ flexWrap: "wrap" }}>
+        <div className="menu-head">
           <div className="tabs" role="toolbar" aria-label="Menu sections">
             {tabs.map((t) => (
               <button key={t.id} type="button" className="tab" aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>
@@ -130,7 +130,14 @@ export function OrderScreen(props: Props) {
             style={markMode ? { background: "var(--warn-bg)", borderColor: "var(--warn-line)" } : undefined}
             onClick={() => setMarkMode((m) => !m)}
           >
-            {markMode ? "Done marking" : "Mark sold out"}
+            {markMode ? (
+              "Done marking"
+            ) : (
+              <>
+                <span className="label-long">Mark sold out</span>
+                <span className="label-short">Sold out</span>
+              </>
+            )}
           </button>
         </div>
         {markMode ? (
@@ -155,7 +162,7 @@ export function OrderScreen(props: Props) {
               {itemCount(lines)} item{itemCount(lines) === 1 ? "" : "s"}
             </span>
           </div>
-          <label className="field small" style={{ fontWeight: 500 }}>
+          <label className="field small order-type" style={{ fontWeight: 500 }}>
             Order type
             <select
               className="input"
