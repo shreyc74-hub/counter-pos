@@ -106,6 +106,37 @@ After go-live, change prices and costs in the admin panel.
 - Discounts above the cashier limit and cashier voids need the owner's PIN.
   Five wrong PINs lock the tablet for a minute.
 
+## Google Sheet backup (recommended)
+
+Every bill, item, void, expense, cash movement and day open/close is also copied to a
+Google Sheet, so you still have the data if the database ever has a problem. The top of
+the counter always shows the backup state ("Sheet backup: up to date", or how many rows
+are waiting and why). Set it up once (about 5 minutes):
+
+1. Create a new Google Sheet (e.g. "Street Heaven POS backup").
+2. In the sheet: **Extensions → Apps Script**. Delete what's there and paste the whole of
+   `integrations/google-sheets/Code.gs`. On the line `const SECRET = 'CHANGE-ME';` put
+   your own secret (any long random text). Save.
+3. **Deploy → New deployment →** type **Web app**. Execute as: **Me**. Who has access:
+   **Anyone**. Deploy, allow the permissions, and copy the **Web app URL**
+   (ends in `/exec`). Opening that URL in a browser should show `{"ok":true,...}`.
+4. In Vercel → Settings → Environment Variables, add `SHEETS_WEBHOOK_URL` = the web app
+   URL and `SHEETS_SECRET` = the same secret. Redeploy.
+5. Open the counter: the top should say "Sheet backup: up to date" after the first bill,
+   and tabs Bills, Items, Expenses, Days, Events appear in the sheet.
+
+If you change the script later, use Deploy → **Manage deployments → Edit → New version**
+so the URL stays the same.
+
+## When the database can't be reached
+
+The counter checks the database every 30 seconds and shows an orange bar if it can't
+reach it. If a bill can't be saved you choose: **Retry**, or **Print now, save to database
+later**. A kept bill stays on the phone (and goes to the Google Sheet), a red bar lists it
+until the database confirms it, and the day can't be closed until then. If the page is
+reloaded during an outage, the counter starts from the phone's last copy and keeps billing.
+Don't clear the browser's data while the red bar is showing.
+
 ## Tests
 
 ```bash

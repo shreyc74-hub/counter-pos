@@ -45,6 +45,10 @@ export interface PosStore {
   /** Supabase only: sign in with just the device key (devices linked to a person). */
   autoLogin?(): Promise<Staff | null>;
   load(): Promise<Bootstrap>;
+  /** Supabase only: cheap check that the database is reachable. */
+  ping?(): Promise<void>;
+  /** Supabase only: carry on from a snapshot saved on this phone while the database is unreachable. */
+  resumeOffline?(boot: Bootstrap, day: DaySession | null): void;
   /** Returns the staff member for a PIN, or null. */
   login(pin: string): Promise<Staff | null>;
   /** Owner approval for a big discount. Null if the PIN is not an owner's. */

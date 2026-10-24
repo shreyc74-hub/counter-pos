@@ -14,8 +14,11 @@ export function OrdersToday({
   staff,
   onVoid,
   onReprint,
+  unsavedIds,
 }: {
   orders: Order[];
+  /** Bills printed but not yet in the database. */
+  unsavedIds?: Set<string>;
   outlet: Outlet;
   staff: Staff;
   onVoid: (orderId: string, reason: string, approverPin: string | null) => Promise<void>;
@@ -55,6 +58,7 @@ export function OrdersToday({
               <span className="stack" style={{ gap: 2 }}>
                 <strong>
                   Token {o.token} · {o.billNo} {o.voided ? <span className="void-tag">VOID</span> : null}
+                  {unsavedIds?.has(o.id) ? <span className="void-tag">NOT SAVED YET</span> : null}
                 </strong>
                 <span className="small muted">
                   {new Date(o.createdAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" })} ·{" "}
