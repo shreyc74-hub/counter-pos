@@ -12,6 +12,7 @@ import {
 } from "./cart";
 import { formatAmount, formatRupees, rupeesToPaise } from "./money";
 import type { DaySession, Order } from "./types";
+import { normalizeSupabaseUrl } from "@/lib/supabaseConfig";
 
 const sell = (id: string) => {
   const s = findSellable(demoMenu, id);
@@ -143,5 +144,20 @@ describe("billing", () => {
     expect(t.upiSalesPaise).toBe(7500);
     expect(t.voids).toBe(1);
     expect(t.expectedCashPaise).toBe(100000 + 17500 - 2000 - 1000);
+  });
+});
+
+
+describe("Supabase URL setting", () => {
+  it("accepts the project URL and common variants", () => {
+    expect(normalizeSupabaseUrl("https://abcd1234.supabase.co")).toBe("https://abcd1234.supabase.co");
+    expect(normalizeSupabaseUrl(" https://abcd1234.supabase.co/rest/v1/ ")).toBe("https://abcd1234.supabase.co");
+    expect(normalizeSupabaseUrl("abcd1234.supabase.co")).toBe("https://abcd1234.supabase.co");
+    expect(normalizeSupabaseUrl('"https://abcd1234.supabase.co"')).toBe("https://abcd1234.supabase.co");
+    expect(normalizeSupabaseUrl("https://supabase.com/dashboard/project/abcd1234/settings/api")).toBe("https://abcd1234.supabase.co");
+  });
+  it("rejects things that are not the API address", () => {
+    expect(normalizeSupabaseUrl("postgres://postgres:pw@db.abcd1234.supabase.co:5432/postgres")).toBeNull();
+    expect(normalizeSupabaseUrl("")).toBeNull();
   });
 });

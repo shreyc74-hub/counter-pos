@@ -114,6 +114,19 @@ export function CounterApp() {
         <button type="button" className="btn btn-dark btn-big" onClick={loadApp}>
           Try again
         </button>
+        {store.setDeviceKey ? (
+          <button
+            type="button"
+            className="btn btn-big"
+            onClick={() => {
+              store.setDeviceKey?.("");
+              loadApp();
+            }}
+          >
+            Enter a different device key
+          </button>
+        ) : null}
+        {"serverUrl" in store ? <p className="small muted">Supabase address in use: {String((store as { serverUrl: string }).serverUrl)}</p> : null}
       </main>
     );
   }
@@ -378,7 +391,8 @@ function DeviceSetup({ message, onSave }: { message: string; onSave: (key: strin
       >
         <h1 style={{ fontSize: 24 }}>Set up this counter</h1>
         <p className="muted" style={{ margin: 0 }}>
-          {message} The owner gets a device key when registering a tablet. It is entered once per tablet.
+          {message} This is <strong>not</strong> a staff PIN: it&apos;s the long key chosen when the tablet was registered in
+          Supabase (setup step 4 in the README). It is entered once per tablet.
         </p>
         <label className="field">
           Device key

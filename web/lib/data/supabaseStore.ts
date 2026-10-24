@@ -42,7 +42,13 @@ export class SupabaseStore implements PosStore {
   ) {}
 
   setDeviceKey(key: string): void {
-    this.storage?.setItem(DEVICE_KEY, key.trim());
+    if (key.trim()) this.storage?.setItem(DEVICE_KEY, key.trim());
+    else this.storage?.removeItem(DEVICE_KEY);
+  }
+
+  /** The Supabase address in use, shown on error screens to help setup. */
+  get serverUrl(): string {
+    return this.url;
   }
 
   private deviceKey(): string {
@@ -196,7 +202,13 @@ export class SupabaseStore implements PosStore {
         body: JSON.stringify(args),
       });
     } catch {
-      throw new StoreError("No internet connection. Check Wi-Fi and try again.", "network");
+      const online = typeof navigator === "undefined" || navigator.onLine;
+      throw new StoreError(
+        online
+          ? `Can't reach the Supabase server at ${this.url}. Check that the URL setting in Vercel is your Supabase Project URL (looks like https://abcd1234.supabase.co), then redeploy.`
+          : "No internet connection. Check Wi-Fi and try again.",
+        "network",
+      );
     }
     const text = await res.text();
     const body = text ? JSON.parse(text) : null;

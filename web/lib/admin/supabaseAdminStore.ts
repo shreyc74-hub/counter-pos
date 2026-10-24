@@ -240,7 +240,9 @@ export class SupabaseAdminStore implements AdminStore {
     try {
       res = await fetch(`${this.url}/rest/v1/rpc/${fn}`, { method: "POST", headers: this.headers(s.accessToken), body: JSON.stringify(args) });
     } catch {
-      throw new Error("No internet connection.");
+      throw new Error(
+        `Can't reach the Supabase server at ${this.url}. If your internet works, check that the URL setting in Vercel is your Supabase Project URL (https://….supabase.co), then redeploy.`,
+      );
     }
     const text = await res.text();
     const body = text ? JSON.parse(text) : null;
