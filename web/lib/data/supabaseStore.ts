@@ -64,6 +64,9 @@ export class SupabaseStore implements PosStore {
       p_device_key: this.deviceKey(),
     });
     if ("error" in b) {
+      // Forget a rejected key right away so it isn't retried on every reload (each retry
+      // counts as a wrong key and would trip the wrong-key pause).
+      this.storage?.removeItem(DEVICE_KEY);
       throw new StoreError("That device key isn't right. Choose your device and enter its key again.", "no_device");
     }
     this.autoLoginDevice = !!b.autoLogin;
@@ -80,7 +83,10 @@ export class SupabaseStore implements PosStore {
       p_device_key: this.deviceKey(),
       p_pin: pin,
     });
-    if (r && "error" in r) throw new StoreError("This device's key is no longer valid. Set it up again.", "no_device");
+    if (r && "error" in r) {
+      this.storage?.removeItem(DEVICE_KEY);
+      throw new StoreError("This device's key is no longer valid. Set it up again.", "no_device");
+    }
     this.session = r?.session ?? null;
     return r?.staff ?? null;
   }
@@ -94,7 +100,10 @@ export class SupabaseStore implements PosStore {
       p_device_key: this.deviceKey(),
     });
     if ("error" in r) {
-      if (r.error === "no_device") throw new StoreError("That device key isn't right. Choose your device and enter its key again.", "no_device");
+      if (r.error === "no_device") {
+        this.storage?.removeItem(DEVICE_KEY);
+        throw new StoreError("That device key isn't right. Choose your device and enter its key again.", "no_device");
+      }
       return null; // this device needs a PIN
     }
     this.session = r.session;

@@ -43,9 +43,14 @@ export class SupabaseAdminStore implements AdminStore {
     if (d) return d.name;
     const s = await this.session();
     if (s) return s.email;
-    // Same phone as the counter: reuse its device key.
+    // Same phone as the counter: reuse its device key. If it's rejected, forget it so it
+    // isn't retried on every visit (each try counts toward the wrong-key pause).
     const counterKey = typeof window !== "undefined" ? window.localStorage.getItem(COUNTER_DEVICE_KEY) : null;
-    if (counterKey && (await this.signInWithDevice(counterKey).catch(() => false))) return this.loadDevice()?.name ?? null;
+    if (counterKey) {
+      const ok = await this.signInWithDevice(counterKey).catch(() => false);
+      if (ok) return this.loadDevice()?.name ?? null;
+      window.localStorage.removeItem(COUNTER_DEVICE_KEY);
+    }
     return null;
   }
 
@@ -309,8 +314,11 @@ export class SupabaseAdminStore implements AdminStore {
         return await this.anonRpc<T>(fn, { ...args, p_session: device.session });
       } catch (e) {
         // Device sessions last 16 hours: sign in again with the saved key once, then retry.
-        if (e instanceof Error && /log in again|sign in/i.test(e.message) && (await this.signInWithDevice(device.key).catch(() => false))) {
-          return this.anonRpc<T>(fn, { ...args, p_session: this.loadDevice()!.session });
+        if (e instanceof Error && /log in again|sign in/i.test(e.message)) {
+          if (await this.signInWithDevice(device.key).catch(() => false)) {
+            return this.anonRpc<T>(fn, { ...args, p_session: this.loadDevice()!.session });
+          }
+          window.localStorage.removeItem(DEVICE_SESSION_KEY); // key no longer valid: sign in again
         }
         throw e;
       }
