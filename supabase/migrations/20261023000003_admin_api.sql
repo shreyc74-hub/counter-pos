@@ -1,10 +1,16 @@
--- Admin API for the owner's admin panel. Callers are signed in with Supabase Auth
+-- Admin API for the owner's admin panel. Safe to run again. Callers are signed in with Supabase Auth
 -- (email one-time code). An outlet's owner_email links the signed-in user to the outlet
 -- on first sign-in; after that, outlet_owners decides access.
 -- Errors use the same hints as the counter API (no_session, not_allowed, invalid).
 
-alter table public.outlets add column owner_email text;
+alter table public.outlets add column if not exists owner_email text;
 
+-- Created only if missing: migration 0004 replaces it with a version that also accepts
+-- device sessions, and re-running this file afterwards must not undo that.
+do $do$
+begin
+  if to_regprocedure('public._require_owner(uuid)') is null then
+    execute $f$
 create function public._require_owner(p_outlet uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
@@ -15,8 +21,11 @@ begin
     perform public._fail('You are not an owner of this outlet.', 'not_allowed');
   end if;
 end $$;
+$f$;
+  end if;
+end $do$;
 
-create function public._bump_menu(p_outlet uuid, p_what text, p_id uuid, p_payload jsonb default '{}')
+create or replace function public._bump_menu(p_outlet uuid, p_what text, p_id uuid, p_payload jsonb default '{}')
 returns void language plpgsql security definer set search_path = public as $$
 begin
   update public.outlets set menu_version = menu_version + 1 where id = p_outlet;
@@ -24,7 +33,7 @@ begin
 end $$;
 
 -- Adds a price/cost row only when something changed (history is never rewritten).
-create function public._set_price(p_outlet uuid, p_kind text, p_ref uuid, p_price integer, p_cost integer)
+create or replace function public._set_price(p_outlet uuid, p_kind text, p_ref uuid, p_price integer, p_cost integer)
 returns void language plpgsql security definer set search_path = public as $$
 declare cur public.price_history;
 begin
@@ -38,7 +47,7 @@ begin
 end $$;
 
 -- Outlets the signed-in user owns. Links the user on first sign-in by matching owner_email.
-create function public.admin_me() returns jsonb
+create or replace function public.admin_me() returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare email text := lower(coalesce(auth.jwt()->>'email', ''));
 begin
@@ -60,7 +69,7 @@ end $$;
 
 -- ---------------------------------------------------------------- menu (with costs)
 
-create function public.admin_menu(p_outlet uuid) returns jsonb
+create or replace function public.admin_menu(p_outlet uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._require_owner(p_outlet);
@@ -95,7 +104,7 @@ begin
     'favourites', coalesce((select jsonb_agg(ref_id order by sort) from public.favourites where outlet_id = p_outlet), '[]'::jsonb));
 end $$;
 
-create function public.admin_price_history(p_outlet uuid, p_ref uuid) returns jsonb
+create or replace function public.admin_price_history(p_outlet uuid, p_ref uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._require_owner(p_outlet);
@@ -104,7 +113,7 @@ begin
                    from public.price_history where outlet_id = p_outlet and ref_id = p_ref), '[]'::jsonb);
 end $$;
 
-create function public.admin_save_category(p_outlet uuid, p_id uuid, p_name text, p_sort integer, p_active boolean)
+create or replace function public.admin_save_category(p_outlet uuid, p_id uuid, p_name text, p_sort integer, p_active boolean)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare rid uuid;
 begin
@@ -122,7 +131,7 @@ begin
   return rid;
 end $$;
 
-create function public.admin_save_item(p_outlet uuid, p_id uuid, p_category uuid, p_name text, p_batch_cooked boolean,
+create or replace function public.admin_save_item(p_outlet uuid, p_id uuid, p_category uuid, p_name text, p_batch_cooked boolean,
                                        p_sort integer, p_active boolean, p_modifier_ids uuid[] default '{}')
 returns uuid language plpgsql security definer set search_path = public as $$
 declare rid uuid;
@@ -153,7 +162,7 @@ begin
   return rid;
 end $$;
 
-create function public.admin_save_variant(p_outlet uuid, p_id uuid, p_item uuid, p_name text, p_sort integer,
+create or replace function public.admin_save_variant(p_outlet uuid, p_id uuid, p_item uuid, p_name text, p_sort integer,
                                           p_active boolean, p_price_paise integer, p_cost_paise integer)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare rid uuid;
@@ -178,7 +187,7 @@ begin
   return rid;
 end $$;
 
-create function public.admin_save_modifier(p_outlet uuid, p_id uuid, p_name text, p_active boolean,
+create or replace function public.admin_save_modifier(p_outlet uuid, p_id uuid, p_name text, p_active boolean,
                                            p_price_paise integer, p_cost_paise integer)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare rid uuid;
@@ -198,7 +207,7 @@ begin
   return rid;
 end $$;
 
-create function public.admin_save_combo(p_outlet uuid, p_id uuid, p_name text, p_description text, p_active boolean,
+create or replace function public.admin_save_combo(p_outlet uuid, p_id uuid, p_name text, p_description text, p_active boolean,
                                         p_price_paise integer, p_cost_paise integer, p_parts jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare rid uuid;
@@ -227,7 +236,7 @@ begin
   return rid;
 end $$;
 
-create function public.admin_set_favourites(p_outlet uuid, p_ids uuid[]) returns void
+create or replace function public.admin_set_favourites(p_outlet uuid, p_ids uuid[]) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._require_owner(p_outlet);
@@ -244,7 +253,7 @@ end $$;
 -- Compact rows for a business-date range; the app computes every metric from these,
 -- so the dashboard, reports and insights all agree. ~300 bills/day keeps this small.
 
-create function public.admin_facts(p_outlet uuid, p_from date, p_to date) returns jsonb
+create or replace function public.admin_facts(p_outlet uuid, p_from date, p_to date) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._require_owner(p_outlet);

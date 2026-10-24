@@ -1,4 +1,4 @@
--- Device sign-in for a one-person outlet, and admin access with the same device.
+-- Device sign-in for a one-person outlet, and admin access with the same device. Safe to run again.
 --
 -- * A device can be linked to a staff member (auto_staff_id). Entering that device's key
 --   signs straight in as them: no PIN step. Used when one person does all the billing.
@@ -9,9 +9,9 @@
 -- * The admin panel can use a device session (owner devices only) instead of email sign-in:
 --   every admin_* function gets an overload with p_session.
 
-alter table public.devices add column auto_staff_id uuid references public.staff(id);
+alter table public.devices add column if not exists auto_staff_id uuid references public.staff(id);
 
-create table public.device_key_failures (
+create table if not exists public.device_key_failures (
   id bigint generated always as identity primary key,
   at timestamptz not null default now()
 );
@@ -111,7 +111,7 @@ begin
 end $$;
 
 -- Device names for the first screen (real outlets only; no keys, no ids).
-create function public.pos_device_choices() returns jsonb
+create or replace function public.pos_device_choices() returns jsonb
 language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object('code', d.code, 'name', coalesce(nullif(d.name, ''), d.code), 'outlet', o.name)
                             order by o.name, d.code), '[]'::jsonb)
@@ -120,7 +120,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- Sign in with just the device key, for devices linked to a staff member.
-create function public.pos_device_login(p_device_key text) returns jsonb
+create or replace function public.pos_device_login(p_device_key text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   d public.devices;
@@ -141,7 +141,7 @@ end $$;
 -- ---------------------------------------------------------------- admin with a device session
 
 -- Marks this request as made by an owner's device session (checked by _require_owner).
-create function public._use_admin_session(p_session uuid) returns void
+create or replace function public._use_admin_session(p_session uuid) returns void
 language plpgsql security definer set search_path = public as $$
 declare ses public.pos_session;
 begin
@@ -170,7 +170,7 @@ begin
 end $$;
 
 -- admin_me for a device session: the session's outlet.
-create function public.admin_me(p_session uuid) returns jsonb
+create or replace function public.admin_me(p_session uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare o uuid;
 begin
@@ -186,63 +186,63 @@ begin
 end $$;
 
 
-create function public.admin_menu(p_outlet uuid, p_session uuid) returns jsonb
+create or replace function public.admin_menu(p_outlet uuid, p_session uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_menu(p_outlet);
 end $$;
 
-create function public.admin_price_history(p_outlet uuid, p_ref uuid, p_session uuid) returns jsonb
+create or replace function public.admin_price_history(p_outlet uuid, p_ref uuid, p_session uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_price_history(p_outlet, p_ref);
 end $$;
 
-create function public.admin_save_category(p_outlet uuid, p_id uuid, p_name text, p_sort integer, p_active boolean, p_session uuid) returns uuid
+create or replace function public.admin_save_category(p_outlet uuid, p_id uuid, p_name text, p_sort integer, p_active boolean, p_session uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_save_category(p_outlet, p_id, p_name, p_sort, p_active);
 end $$;
 
-create function public.admin_save_item(p_outlet uuid, p_id uuid, p_category uuid, p_name text, p_batch_cooked boolean, p_sort integer, p_active boolean, p_modifier_ids uuid[], p_session uuid) returns uuid
+create or replace function public.admin_save_item(p_outlet uuid, p_id uuid, p_category uuid, p_name text, p_batch_cooked boolean, p_sort integer, p_active boolean, p_modifier_ids uuid[], p_session uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_save_item(p_outlet, p_id, p_category, p_name, p_batch_cooked, p_sort, p_active, p_modifier_ids);
 end $$;
 
-create function public.admin_save_variant(p_outlet uuid, p_id uuid, p_item uuid, p_name text, p_sort integer, p_active boolean, p_price_paise integer, p_cost_paise integer, p_session uuid) returns uuid
+create or replace function public.admin_save_variant(p_outlet uuid, p_id uuid, p_item uuid, p_name text, p_sort integer, p_active boolean, p_price_paise integer, p_cost_paise integer, p_session uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_save_variant(p_outlet, p_id, p_item, p_name, p_sort, p_active, p_price_paise, p_cost_paise);
 end $$;
 
-create function public.admin_save_modifier(p_outlet uuid, p_id uuid, p_name text, p_active boolean, p_price_paise integer, p_cost_paise integer, p_session uuid) returns uuid
+create or replace function public.admin_save_modifier(p_outlet uuid, p_id uuid, p_name text, p_active boolean, p_price_paise integer, p_cost_paise integer, p_session uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_save_modifier(p_outlet, p_id, p_name, p_active, p_price_paise, p_cost_paise);
 end $$;
 
-create function public.admin_save_combo(p_outlet uuid, p_id uuid, p_name text, p_description text, p_active boolean, p_price_paise integer, p_cost_paise integer, p_parts jsonb, p_session uuid) returns uuid
+create or replace function public.admin_save_combo(p_outlet uuid, p_id uuid, p_name text, p_description text, p_active boolean, p_price_paise integer, p_cost_paise integer, p_parts jsonb, p_session uuid) returns uuid
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   return public.admin_save_combo(p_outlet, p_id, p_name, p_description, p_active, p_price_paise, p_cost_paise, p_parts);
 end $$;
 
-create function public.admin_set_favourites(p_outlet uuid, p_ids uuid[], p_session uuid) returns void
+create or replace function public.admin_set_favourites(p_outlet uuid, p_ids uuid[], p_session uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
   perform public.admin_set_favourites(p_outlet, p_ids);
 end $$;
 
-create function public.admin_facts(p_outlet uuid, p_from date, p_to date, p_session uuid) returns jsonb
+create or replace function public.admin_facts(p_outlet uuid, p_from date, p_to date, p_session uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform public._use_admin_session(p_session);
