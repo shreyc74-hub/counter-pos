@@ -119,7 +119,8 @@ function SignIn({ store, onSignedIn }: { store: ReturnType<typeof createAdminSto
           </p>
           <div className="notice small">
             Not connected to Supabase: this version was built without {supabaseConfig().missing.join(" and ")}. Add it in Vercel →
-            Settings → Environment Variables, then redeploy.
+            Settings → Environment Variables (tick Production), then redeploy. Supabase settings this build could see:{" "}
+            {supabaseConfig().seenNames || "none"}.
           </div>
           <PinPad
             light

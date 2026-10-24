@@ -63,8 +63,11 @@ receipt screen shows **Retry**.
    costs empty). Its last lines show how to add your email, the tablet's device key and staff PINs.
    Optional, for trying things out: `supabase/seed.sql` adds a separate demo outlet with ~90 days of fake sales.
    (If you use the Supabase CLI: run `supabase init` once, then `supabase link` and `supabase db push`.)
-3. Copy `web/.env.example` to `web/.env.local` and fill in the project URL and **anon** key
-   (Project settings → API).
+3. Add the project URL and the **anon / publishable** key (Supabase → Project settings → API keys)
+   as environment variables, in Vercel (Settings → Environment Variables, tick Production, then redeploy)
+   or in `web/.env.local` for local runs. Either naming works: `SUPABASE_URL` + `SUPABASE_ANON_KEY`, or
+   `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (also `…PUBLISHABLE_KEY`).
+   Never use the service-role key here; the app ignores it.
 4. `npm run dev` again. The counter asks for a **device key** once per tablet.
    Demo outlet key: `demo-t1-key`.
 5. **Admin sign-in.** In Supabase → Authentication → URL Configuration, set the **Site URL**

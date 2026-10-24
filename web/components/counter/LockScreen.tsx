@@ -46,7 +46,9 @@ export function LockScreen({
             <br />
             <span style={{ color: "#fdba74" }}>
               Not connected: this version was built without {supabaseConfig().missing.join(" and ")}. Add it in Vercel → Settings →
-              Environment Variables, then redeploy.
+              Environment Variables (tick Production), then redeploy.
+              <br />
+              Supabase settings this build could see: {supabaseConfig().seenNames || "none"}.
             </span>
           </div>
         ) : (
