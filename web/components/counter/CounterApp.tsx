@@ -43,6 +43,9 @@ export function CounterApp() {
   // Remounting the order screen empties its cart (used after a retried save succeeds).
   const [cartKey, setCartKey] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  // A bill number taken for a bill that then failed to save is reused for the next try,
+  // so a failed save never leaves a gap in the bill numbers.
+  const unusedNumber = useRef<{ billNo: string; token: number; dayId: string } | null>(null);
   // Dish photos (cached on this device; only new or changed ones are downloaded).
   const [photos, setPhotos] = useState<Record<string, string>>({});
   const clearToast = useCallback(() => setToast(null), []);
@@ -220,9 +223,18 @@ export function CounterApp() {
     try {
       await store.submitOrder(order);
     } catch (e) {
-      setFailedSave({ order, error: errorText(e) });
+      let error = errorText(e);
+      // "Bill number already used": that number is taken after all, so the next try gets a new one.
+      const numberTaken = e instanceof StoreError && e.code === "conflict" && /bill number/i.test(error);
+      unusedNumber.current = numberTaken ? null : { billNo: order.billNo, token: order.token, dayId: order.daySessionId };
+      if (order.unpaid && /Payments \(0\)/.test(error)) {
+        error =
+          "The database hasn't been updated for NOT PAID bills yet. In Supabase → SQL Editor, run supabase/migrations/20261030000006_pay_later.sql, then try again. (Or take the payment now with CASH / UPI.)";
+      }
+      setFailedSave({ order, error });
       return false;
     }
+    unusedNumber.current = null;
     setFailedSave(null);
     if (isRetry) {
       // The cart was not emptied by the order screen (its save failed first): empty it now.
@@ -236,7 +248,8 @@ export function CounterApp() {
   };
 
   const submit = async (draft: OrderDraft, payments: Payment[]): Promise<boolean> => {
-    const { billNo, token } = await store.nextBillNumber();
+    const reuse = unusedNumber.current?.dayId === day.id ? unusedNumber.current : null;
+    const { billNo, token } = reuse ?? (await store.nextBillNumber());
     const subtotal = subtotalPaise(draft.lines);
     const order: Order = {
       id: uuid(),
