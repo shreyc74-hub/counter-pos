@@ -3,8 +3,8 @@ import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/l
 import { uuid } from "@/lib/uuid";
 import { toCounterMenu } from "@/lib/admin/menu";
 import { demoOutlet, demoStaff } from "./demoMenu";
-import { loadDemoAdminMenu } from "./demoMenuStorage";
-import { type Bootstrap, type CloseDayInput, type OwnerApproval, type PosStore, StoreError } from "./store";
+import { loadDemoAdminMenu, loadDemoPhotos } from "./demoMenuStorage";
+import { type Bootstrap, type CloseDayInput, type ItemPhoto, type OwnerApproval, type PosStore, StoreError } from "./store";
 
 export interface DemoState {
   days: DaySession[];
@@ -196,6 +196,10 @@ export class DemoStore implements PosStore {
 
   async listCashMovements(daySessionId: string): Promise<CashMovement[]> {
     return this.read().movements.filter((m) => m.daySessionId === daySessionId);
+  }
+
+  async itemPhotos(): Promise<ItemPhoto[]> {
+    return Object.entries(loadDemoPhotos(this.storage)).map(([itemId, data]) => ({ itemId, updatedAt: "demo", data }));
   }
 
   async setSoldOut(sellableId: string, soldOut: boolean): Promise<void> {

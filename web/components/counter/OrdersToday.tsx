@@ -60,6 +60,7 @@ export function OrdersToday({
                   {new Date(o.createdAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" })} ·{" "}
                   {o.payments.map((p) => (p.method === "cash" ? "Cash" : "UPI")).join(" + ")} · {o.staffName}
                   {o.channel !== "counter" ? ` · ${o.channel}` : ""}
+                  {o.service ? ` · ${o.service === "dine_in" ? "Dine in" : "Takeaway"}` : ""}
                 </span>
               </span>
               <strong style={o.voided ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>

@@ -105,6 +105,7 @@ export function layoutReceipt(order: Order, outlet: Outlet, opts: ReceiptOptions
   t(twoCol(formatDateTime(order.createdAt), CHANNEL_LABEL[order.channel], W));
   if (order.externalOrderId) t(`${CHANNEL_LABEL[order.channel]} ID: ${order.externalOrderId}`);
   t(`Staff: ${order.staffName}`);
+  if (order.service) t(order.service === "dine_in" ? "DINE IN" : "TAKEAWAY", { align: "center", bold: true, big: true });
   lines.push({ kind: "rule" });
 
   t(row("Item", "Qty", "Amt", nameW, qtyW, amtW));

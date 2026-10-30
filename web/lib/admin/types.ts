@@ -147,6 +147,10 @@ export interface AdminStore {
   saveModifier(outletId: string, m: Omit<AdminModifier, "id"> & { id: string | null }): Promise<string>;
   saveCombo(outletId: string, c: Omit<AdminCombo, "id"> & { id: string | null }): Promise<string>;
   setFavourites(outletId: string, ids: string[]): Promise<void>;
+  /** Dish photos by item id. */
+  itemPhotos(outletId: string): Promise<Record<string, string>>;
+  /** Sets a dish photo (a data URL made by lib/admin/photo.ts), or removes it with null. */
+  setItemPhoto(outletId: string, itemId: string, data: string | null): Promise<void>;
 
   /** Everything the dashboard needs for a business-date range (inclusive). */
   facts(outletId: string, from: string, to: string): Promise<Facts>;

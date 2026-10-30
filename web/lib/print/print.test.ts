@@ -109,3 +109,14 @@ describe("ESC/POS encoding", () => {
     expect(has(encodeReceipt(lines, { cut: false }))).toBe(false);
   });
 });
+
+describe("dine in / takeaway on the receipt", () => {
+  it("prints it big under the staff name, and nothing for older bills", () => {
+    const text = (o: Order) => layoutReceipt(o, demoOutlet, { width: 32 }).filter((l) => l.kind === "text").map((l) => (l as { text: string }).text);
+    const take = layoutReceipt({ ...sampleOrder(), service: "takeaway" }, demoOutlet, { width: 32 });
+    const line = take.find((l) => l.kind === "text" && l.text === "TAKEAWAY");
+    expect(line).toMatchObject({ big: true, bold: true, align: "center" });
+    expect(text({ ...sampleOrder(), service: "dine_in" })).toContain("DINE IN");
+    expect(text(sampleOrder()).some((t) => t === "TAKEAWAY" || t === "DINE IN")).toBe(false);
+  });
+});

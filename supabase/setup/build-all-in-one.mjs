@@ -1,4 +1,4 @@
-// Joins the three migrations and the Street Heaven setup into one file that can be pasted
+// Joins the migrations and the Street Heaven setup into one file that can be pasted
 // into the Supabase SQL editor in one go:  node supabase/setup/build-all-in-one.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,6 +10,7 @@ const parts = [
   "supabase/migrations/20261023000002_pos_api.sql",
   "supabase/migrations/20261023000003_admin_api.sql",
   "supabase/migrations/20261024000004_device_login.sql",
+  "supabase/migrations/20261030000005_service_and_photos.sql",
   "supabase/setup/street-heaven.sql",
 ];
 const header = `-- ============================================================================

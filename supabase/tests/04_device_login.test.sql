@@ -31,7 +31,7 @@ begin
   me := public.admin_me(ses);
   perform test.ok(me#>>'{outlets,0,name}' = 'Street Heaven', 'admin opens with the device session');
   m := public.admin_menu(outlet, ses);
-  perform test.ok(jsonb_array_length(m->'variants') = 60, 'admin menu loads with the device session');
+  perform test.ok(jsonb_array_length(m->'variants') = 66, 'admin menu loads with the device session');
   perform public.admin_save_variant(outlet, (m#>>'{variants,0,id}')::uuid, (m#>>'{variants,0,itemId}')::uuid,
                                     m#>>'{variants,0,name}', 1, true, (m#>>'{variants,0,pricePaise}')::int, 2500, ses);
   perform test.ok(exists (select 1 from jsonb_array_elements(public.admin_menu(outlet, ses)->'variants') v

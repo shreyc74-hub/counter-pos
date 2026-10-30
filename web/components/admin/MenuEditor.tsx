@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { marginOf } from "@/lib/admin/menu";
+import { photoToDataUrl } from "@/lib/admin/photo";
 import { sellableName } from "@/lib/admin/metrics";
 import type { AdminCombo, AdminItem, AdminMenu, AdminModifier, AdminStore, AdminVariant, PricePoint } from "@/lib/admin/types";
 import { formatRupees, rupeesToPaise } from "@/lib/domain/money";
@@ -88,6 +89,11 @@ function ItemsTab({ store, outletId, menu, onChanged }: Props) {
   const [newItem, setNewItem] = useState("");
   const [onlyMissing, setOnlyMissing] = useState(false);
   const saver = useSaver(onChanged);
+  const [photos, setPhotos] = useState<Record<string, string>>({});
+  const reloadPhotos = useCallback(async () => setPhotos(await store.itemPhotos(outletId)), [store, outletId]);
+  useEffect(() => {
+    reloadPhotos().catch(() => undefined);
+  }, [reloadPhotos]);
   const cat = menu.categories.find((c) => c.id === catId) ?? null;
   const items = menu.items
     .filter((i) => i.categoryId === catId)
@@ -142,7 +148,16 @@ function ItemsTab({ store, outletId, menu, onChanged }: Props) {
       ) : null}
 
       {items.map((item) => (
-        <ItemCard key={item.id} item={item} store={store} outletId={outletId} menu={menu} onChanged={onChanged} />
+        <ItemCard
+          key={item.id}
+          item={item}
+          store={store}
+          outletId={outletId}
+          menu={menu}
+          onChanged={onChanged}
+          photo={photos[item.id] ?? null}
+          onPhotoChanged={reloadPhotos}
+        />
       ))}
       {items.length === 0 ? <p className="muted">No items here yet.</p> : null}
 
@@ -178,7 +193,15 @@ function ItemsTab({ store, outletId, menu, onChanged }: Props) {
   );
 }
 
-function ItemCard({ item, store, outletId, menu, onChanged }: { item: AdminItem } & Props) {
+function ItemCard({
+  item,
+  store,
+  outletId,
+  menu,
+  onChanged,
+  photo,
+  onPhotoChanged,
+}: { item: AdminItem; photo: string | null; onPhotoChanged: () => Promise<void> } & Props) {
   const [name, setName] = useState(item.name);
   const [batch, setBatch] = useState(item.batchCooked);
   const [mods, setMods] = useState(item.modifierIds);
@@ -191,6 +214,7 @@ function ItemCard({ item, store, outletId, menu, onChanged }: { item: AdminItem 
   return (
     <section className="card stack" style={{ gap: 12, opacity: item.active ? 1 : 0.7 }} aria-label={item.name}>
       <div className="row" style={{ flexWrap: "wrap" }}>
+        <PhotoPicker photo={photo} name={item.name} onPick={(data) => store.setItemPhoto(outletId, item.id, data).then(onPhotoChanged)} />
         <input className="input grow" style={{ fontWeight: 700, fontSize: 18, minHeight: 46 }} value={name} aria-label="Item name" onChange={(e) => setName(e.target.value)} />
         <label className="row small" style={{ gap: 6 }}>
           <input type="checkbox" checked={batch} onChange={(e) => setBatch(e.target.checked)} /> Cooked in batches (prep forecast)
@@ -243,6 +267,48 @@ function ItemCard({ item, store, outletId, menu, onChanged }: { item: AdminItem 
         </table>
       </div>
     </section>
+  );
+}
+
+/** Dish photo: tap to take or choose one (it is shrunk on this device before upload). */
+function PhotoPicker({ photo, name, onPick }: { photo: string | null; name: string; onPick: (data: string | null) => Promise<void> }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (f: () => Promise<string | null>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onPick(await f());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save the photo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="photo-pick">
+      <button type="button" className="photo-thumb" onClick={() => input.current?.click()} disabled={busy} aria-label={photo ? `Change photo of ${name}` : `Add a photo of ${name}`}>
+        {photo ? <img src={photo} alt="" /> : <span>{busy ? "Saving…" : "+ Photo"}</span>}
+      </button>
+      {photo ? (
+        <button type="button" className="btn photo-remove" disabled={busy} onClick={() => void run(async () => null)}>
+          Remove
+        </button>
+      ) : null}
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void run(() => photoToDataUrl(file));
+        }}
+      />
+      {error ? <span className="error small">{error}</span> : null}
+    </div>
   );
 }
 

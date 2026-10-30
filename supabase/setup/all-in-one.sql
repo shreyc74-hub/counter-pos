@@ -1700,6 +1700,343 @@ begin
 end $$;
 
 
+-- ---------------------------------------------------------------- supabase/migrations/20261030000005_service_and_photos.sql
+
+-- Dine in / takeaway on every bill, and dish photos for the menu. Safe to run again.
+--
+-- * orders.service: 'dine_in' or 'takeaway' (empty for bills saved before this update).
+--   pos_submit_order stores it; _order_json returns it. Everything else is unchanged.
+-- * item_photos: one small photo per dish (a compressed image the admin panel makes on
+--   upload, stored as a data URL). The counter fetches only photos it doesn't have yet.
+
+alter table public.orders add column if not exists service text;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'orders_service_check') then
+    alter table public.orders add constraint orders_service_check check (service in ('dine_in', 'takeaway'));
+  end if;
+end $$;
+
+create table if not exists public.item_photos (
+  item_id uuid primary key references public.items(id),
+  outlet_id uuid not null references public.outlets(id),
+  data text not null check (length(data) <= 300000),
+  updated_at timestamptz not null default now()
+);
+alter table public.item_photos enable row level security;
+revoke all on public.item_photos from anon, authenticated;
+
+create or replace function public._order_json(p_order uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'id', o.id,
+    'billNo', o.bill_no,
+    'token', o.token,
+    'deviceCode', d.code,
+    'staffId', o.staff_id,
+    'staffName', st.name,
+    'daySessionId', o.day_session_id,
+    'channel', o.channel,
+    'service', o.service,
+    'externalOrderId', o.external_order_id,
+    'note', o.note,
+    'lines', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'key', l.id,
+        'kind', l.kind,
+        'refId', l.ref_id,
+        'name', l.name,
+        'qty', l.qty,
+        'unitPricePaise', l.unit_price_paise,
+        'unitCostPaise', null, -- costs stay on the server; the counter never needs them
+        'modifiers', coalesce((
+          select jsonb_agg(jsonb_build_object('modifierId', m.modifier_id, 'name', m.name, 'pricePaise', m.price_paise, 'costPaise', null))
+          from public.order_line_modifiers m where m.order_line_id = l.id), '[]'::jsonb)
+      ) order by l.line_no)
+      from public.order_lines l where l.order_id = o.id), '[]'::jsonb),
+    'subtotalPaise', o.subtotal_paise,
+    'discount', case when o.discount_paise > 0 then jsonb_build_object(
+      'amountPaise', o.discount_paise,
+      'reason', o.discount_reason,
+      'approvedBy', (select name from public.staff where id = o.discount_approved_by)) end,
+    'totalPaise', o.total_paise,
+    'payments', coalesce((
+      select jsonb_agg(jsonb_build_object('method', p.method, 'amountPaise', p.amount_paise, 'cashReceivedPaise', p.cash_received_paise)
+                       order by p.method)
+      from public.payments p where p.order_id = o.id), '[]'::jsonb),
+    'createdAt', o.client_created_at,
+    'menuVersion', o.menu_version,
+    'voided', (select jsonb_build_object(
+                 'reason', v.reason,
+                 'by', (select name from public.staff where id = v.staff_id),
+                 'approvedBy', (select name from public.staff where id = v.approved_by),
+                 'at', v.created_at)
+               from public.order_voids v where v.order_id = o.id)
+  )
+  from public.orders o
+  join public.devices d on d.id = o.device_id
+  join public.staff st on st.id = o.staff_id
+  where o.id = p_order;
+$$;
+
+create or replace function public.pos_submit_order(p_session uuid, p_order jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  ses public.pos_session;
+  d public.day_sessions;
+  oid uuid := (p_order->>'id')::uuid;
+  existing public.orders;
+  bill text := p_order->>'billNo';
+  seq integer;
+  line jsonb;
+  m jsonb;
+  pr public.price_history;
+  mpr public.price_history;
+  ref_ok boolean;
+  mod_name text;
+  qty integer;
+  mods jsonb;
+  mods_total integer;
+  computed jsonb := '[]'::jsonb;
+  c jsonb;
+  ln integer := 0;
+  lid uuid;
+  subtotal integer := 0;
+  disc integer := coalesce((p_order#>>'{discount,amountPaise}')::int, 0);
+  disc_reason text := nullif(trim(coalesce(p_order#>>'{discount,reason}', '')), '');
+  approval public.owner_approvals;
+  approver uuid;
+  limit_paise integer;
+  total integer;
+  pay jsonb;
+  paid integer := 0;
+  svc text := nullif(p_order->>'service', '');
+begin
+  ses := public._session(p_session);
+  if oid is null then perform public._fail('Order id missing.', 'invalid'); end if;
+
+  select * into existing from public.orders where id = oid;
+  if found then
+    if existing.outlet_id <> ses.outlet_id then perform public._fail('Order id already used.', 'conflict'); end if;
+    return public._order_json(oid); -- a retry of a bill that already reached us
+  end if;
+
+  d := public._open_day(ses.outlet_id);
+  if (p_order->>'daySessionId')::uuid is distinct from d.id then
+    perform public._fail('This bill belongs to a day that is no longer open. Reload the app.', 'no_open_day');
+  end if;
+
+  -- bill number: "<device code>-<sequence>", owned by this device
+  if bill is null or bill !~ ('^' || ses.device_code || '-[0-9]{1,9}$') then
+    perform public._fail('Bill number does not belong to this device.', 'invalid');
+  end if;
+  seq := split_part(bill, '-', 2)::int;
+  if exists (select 1 from public.orders where outlet_id = ses.outlet_id and bill_no = bill) then
+    perform public._fail('Bill number already used. Reload the app.', 'conflict');
+  end if;
+  if coalesce(p_order->>'channel', '') not in ('counter', 'swiggy', 'zomato', 'phone') then
+    perform public._fail('Unknown order type.', 'invalid');
+  end if;
+  if svc is not null and svc not in ('dine_in', 'takeaway') then
+    perform public._fail('Unknown dine-in / takeaway choice.', 'invalid');
+  end if;
+  if coalesce((p_order->>'token')::int, 0) <= 0 then
+    perform public._fail('Token missing.', 'invalid');
+  end if;
+  if jsonb_array_length(coalesce(p_order->'lines', '[]'::jsonb)) = 0 then
+    perform public._fail('An order needs at least one item.', 'invalid');
+  end if;
+
+  -- 1. validate lines against the current menu and compute totals
+  for line in select * from jsonb_array_elements(p_order->'lines') loop
+    qty := (line->>'qty')::int;
+    if qty is null or qty <= 0 then perform public._fail('Quantity must be at least 1.', 'invalid'); end if;
+    if line->>'kind' = 'variant' then
+      select exists (select 1 from public.variants where id = (line->>'refId')::uuid and outlet_id = ses.outlet_id and active) into ref_ok;
+    elsif line->>'kind' = 'combo' then
+      select exists (select 1 from public.combos where id = (line->>'refId')::uuid and outlet_id = ses.outlet_id and active) into ref_ok;
+    else
+      ref_ok := false;
+    end if;
+    if not ref_ok then perform public._fail('Unknown menu item. Reload the app.', 'conflict'); end if;
+    pr := public._price((line->>'refId')::uuid);
+    if pr.id is null or pr.price_paise <> (line->>'unitPricePaise')::int then
+      perform public._fail('A price has changed. Reload the app to get the new menu.', 'conflict');
+    end if;
+
+    mods := '[]'::jsonb;
+    mods_total := 0;
+    for m in select * from jsonb_array_elements(coalesce(line->'modifiers', '[]'::jsonb)) loop
+      select name into mod_name from public.modifiers where id = (m->>'modifierId')::uuid and outlet_id = ses.outlet_id;
+      if mod_name is null then perform public._fail('Unknown add-on. Reload the app.', 'conflict'); end if;
+      mpr := public._price((m->>'modifierId')::uuid);
+      if coalesce(mpr.price_paise, 0) <> coalesce((m->>'pricePaise')::int, 0) then
+        perform public._fail('An add-on price has changed. Reload the app.', 'conflict');
+      end if;
+      mods := mods || jsonb_build_object('id', m->>'modifierId', 'name', mod_name,
+                                         'price', coalesce(mpr.price_paise, 0), 'cost', mpr.cost_paise);
+      mods_total := mods_total + coalesce(mpr.price_paise, 0);
+    end loop;
+
+    computed := computed || jsonb_build_object(
+      'kind', line->>'kind', 'refId', line->>'refId', 'name', coalesce(nullif(line->>'name', ''), 'Item'),
+      'qty', qty, 'price', pr.price_paise, 'cost', pr.cost_paise,
+      'total', (pr.price_paise + mods_total) * qty, 'mods', mods);
+    subtotal := subtotal + (pr.price_paise + mods_total) * qty;
+  end loop;
+
+  -- 2. discount rules
+  if disc < 0 then perform public._fail('Discount cannot be negative.', 'invalid'); end if;
+  if disc > subtotal then perform public._fail('Discount is more than the bill.', 'invalid'); end if;
+  if disc > 0 and disc_reason is null then perform public._fail('A discount needs a reason.', 'invalid'); end if;
+  if disc > 0 and ses.role <> 'owner' then
+    select cashier_discount_limit_paise into limit_paise from public.outlets where id = ses.outlet_id;
+    if disc > limit_paise then
+      select * into approval from public.owner_approvals
+        where token = (p_order#>>'{discount,approvalToken}')::uuid and used_at is null and expires_at > now()
+          and device_id = ses.device_id;
+      if approval.token is null then
+        perform public._fail('This discount needs the owner''s PIN.', 'not_allowed');
+      end if;
+      update public.owner_approvals set used_at = now() where token = approval.token;
+      approver := approval.owner_id;
+    end if;
+  end if;
+  total := subtotal - disc;
+  if (p_order->>'totalPaise')::int is distinct from total then
+    perform public._fail('Bill total does not match the menu. Reload the app.', 'conflict');
+  end if;
+
+  -- 3. payments must add up exactly
+  for pay in select * from jsonb_array_elements(coalesce(p_order->'payments', '[]'::jsonb)) loop
+    if coalesce(pay->>'method', '') not in ('cash', 'upi') or coalesce((pay->>'amountPaise')::int, 0) <= 0 then
+      perform public._fail('Invalid payment.', 'invalid');
+    end if;
+    if pay->>'method' = 'cash' and (pay->>'cashReceivedPaise')::int < (pay->>'amountPaise')::int then
+      perform public._fail('Cash received is less than the cash amount.', 'invalid');
+    end if;
+    paid := paid + (pay->>'amountPaise')::int;
+  end loop;
+  if paid <> total then
+    perform public._fail(format('Payments (%s) do not match the bill total (%s).', paid, total), 'invalid');
+  end if;
+
+  -- 4. write once
+  insert into public.orders (
+    id, outlet_id, device_id, bill_no, bill_seq, token, staff_id, day_session_id, channel,
+    external_order_id, note, subtotal_paise, discount_paise, discount_reason, discount_approved_by,
+    total_paise, menu_version, client_created_at, service)
+  values (
+    oid, ses.outlet_id, ses.device_id, bill, seq, (p_order->>'token')::int, ses.staff_id, d.id, p_order->>'channel',
+    case when p_order->>'channel' in ('swiggy', 'zomato') then nullif(trim(coalesce(p_order->>'externalOrderId', '')), '') end,
+    nullif(trim(coalesce(p_order->>'note', '')), ''),
+    subtotal, disc, case when disc > 0 then disc_reason end, approver, total,
+    coalesce((p_order->>'menuVersion')::int, 0), coalesce((p_order->>'createdAt')::timestamptz, now()), svc);
+
+  for c in select * from jsonb_array_elements(computed) loop
+    ln := ln + 1;
+    insert into public.order_lines (order_id, line_no, kind, ref_id, name, qty, unit_price_paise, unit_cost_paise, line_total_paise)
+    values (oid, ln, c->>'kind', (c->>'refId')::uuid, c->>'name', (c->>'qty')::int, (c->>'price')::int,
+            (c->>'cost')::int, (c->>'total')::int)
+    returning id into lid;
+    insert into public.order_line_modifiers (order_line_id, modifier_id, name, price_paise, cost_paise)
+    select lid, (x->>'id')::uuid, x->>'name', (x->>'price')::int, (x->>'cost')::int
+    from jsonb_array_elements(c->'mods') x;
+  end loop;
+
+  insert into public.payments (order_id, method, amount_paise, cash_received_paise)
+  select oid, x->>'method', (x->>'amountPaise')::int,
+         case when x->>'method' = 'cash' then (x->>'cashReceivedPaise')::int end
+  from jsonb_array_elements(p_order->'payments') x;
+
+  update public.devices set last_bill_seq = greatest(last_bill_seq, seq) where id = ses.device_id;
+  perform public._log(ses.outlet_id, 'order_created', oid, ses.staff_id, ses.device_id,
+                      jsonb_build_object('billNo', bill, 'totalPaise', total));
+  return public._order_json(oid);
+end $$;
+
+-- ---------------------------------------------------------------- photos
+
+-- The counter sends the photos it already has ({itemId: updatedAt}) and gets back the
+-- current list; data is only included for photos that are new or changed.
+create or replace function public.pos_item_photos(p_session uuid, p_have jsonb default '{}') returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare ses public.pos_session;
+begin
+  ses := public._session(p_session);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'itemId', p.item_id,
+      'updatedAt', p.updated_at,
+      'data', case when coalesce(p_have->>p.item_id::text, '') = to_jsonb(p.updated_at)#>>'{}' then null else p.data end))
+    from public.item_photos p join public.items i on i.id = p.item_id and i.active
+    where p.outlet_id = ses.outlet_id), '[]'::jsonb);
+end $$;
+
+-- Sets (or with p_data null, removes) a dish's photo.
+create or replace function public.admin_set_item_photo(p_outlet uuid, p_item uuid, p_data text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._require_owner(p_outlet);
+  if not exists (select 1 from public.items where id = p_item and outlet_id = p_outlet) then
+    perform public._fail('Item not found.', 'invalid');
+  end if;
+  if p_data is null then
+    delete from public.item_photos where item_id = p_item;
+  else
+    if p_data !~ '^data:image/(jpeg|png|webp);base64,' then perform public._fail('Not an image.', 'invalid'); end if;
+    if length(p_data) > 300000 then perform public._fail('Photo is too large.', 'invalid'); end if;
+    insert into public.item_photos (item_id, outlet_id, data) values (p_item, p_outlet, p_data)
+    on conflict (item_id) do update set data = excluded.data, updated_at = now();
+  end if;
+  perform public._log(p_outlet, 'item_photo_set', p_item, null, null, jsonb_build_object('removed', p_data is null));
+end $$;
+
+create or replace function public.admin_set_item_photo(p_outlet uuid, p_item uuid, p_data text, p_session uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._use_admin_session(p_session);
+  perform public.admin_set_item_photo(p_outlet, p_item, p_data);
+end $$;
+
+-- Every dish photo of the outlet ({itemId: data}), for the admin menu editor.
+create or replace function public.admin_item_photos(p_outlet uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._require_owner(p_outlet);
+  return coalesce((select jsonb_object_agg(item_id, data) from public.item_photos where outlet_id = p_outlet), '{}'::jsonb);
+end $$;
+
+create or replace function public.admin_item_photos(p_outlet uuid, p_session uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._use_admin_session(p_session);
+  return public.admin_item_photos(p_outlet);
+end $$;
+
+-- ---------------------------------------------------------------- permissions (same rules as before)
+
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig, p.proname, pg_get_function_identity_arguments(p.oid) as args
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and (p.proname like 'pos\_%' or p.proname like 'admin\_%' or p.proname like '\_%')
+  loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.sig);
+    if f.proname like 'pos\_%' then
+      execute format('grant execute on function %s to anon, authenticated', f.sig);
+    elsif f.proname like 'admin\_%' then
+      execute format('grant execute on function %s to authenticated', f.sig);
+      if f.args like '%p_session uuid%' then
+        execute format('grant execute on function %s to anon', f.sig);
+      end if;
+    end if;
+  end loop;
+end $$;
+
+
 -- ---------------------------------------------------------------- supabase/setup/street-heaven.sql
 
 -- Street Heaven: the real outlet, with the full menu and prices. Costs are left empty:
@@ -1712,84 +2049,112 @@ insert into public.outlets (id, name, address_line, phone, fssai_no, receipt_foo
 values (pg_temp.sid('outlet'), 'Street Heaven', 'Near Ashiana Gol Chakkar, Raj Nagar Extension', '96542 39599 / 72487 36905', '', 'Free soup with every order. Thank you!', false);
 
 insert into public.categories (id, outlet_id, name, sort) values
-  (pg_temp.sid('cat-momos'), pg_temp.sid('outlet'), 'Momos', 1),
-  (pg_temp.sid('cat-noodles'), pg_temp.sid('outlet'), 'Noodles / Rice', 2),
-  (pg_temp.sid('cat-chinese'), pg_temp.sid('outlet'), 'Chinese', 3),
-  (pg_temp.sid('cat-snacks'), pg_temp.sid('outlet'), 'Snacks', 4);
+  (pg_temp.sid('cat-momo'), pg_temp.sid('outlet'), 'Momo', 1),
+  (pg_temp.sid('cat-kurkure'), pg_temp.sid('outlet'), 'Kurkure Momos', 2),
+  (pg_temp.sid('cat-gravy'), pg_temp.sid('outlet'), 'Gravy Momos', 3),
+  (pg_temp.sid('cat-schezwan'), pg_temp.sid('outlet'), 'Schezwan Momo', 4),
+  (pg_temp.sid('cat-noodles'), pg_temp.sid('outlet'), 'Noodles', 5),
+  (pg_temp.sid('cat-rice'), pg_temp.sid('outlet'), 'Fried Rice', 6),
+  (pg_temp.sid('cat-chinese'), pg_temp.sid('outlet'), 'Chinese', 7),
+  (pg_temp.sid('cat-snacks'), pg_temp.sid('outlet'), 'Snacks', 8),
+  (pg_temp.sid('cat-new'), pg_temp.sid('outlet'), 'New Entries', 9);
 
 insert into public.items (id, outlet_id, category_id, name, batch_cooked, sort) values
-  (pg_temp.sid('it-pan-momos'), pg_temp.sid('outlet'), pg_temp.sid('cat-momos'), 'Paneer Momos', true, 1),
-  (pg_temp.sid('it-veg-momos'), pg_temp.sid('outlet'), pg_temp.sid('cat-momos'), 'Veg Momos', true, 2),
-  (pg_temp.sid('it-soy-momos'), pg_temp.sid('outlet'), pg_temp.sid('cat-momos'), 'Soya Momos', true, 3),
-  (pg_temp.sid('it-veg-nr'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Veg', false, 4),
-  (pg_temp.sid('it-pan-nr'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Paneer', false, 5),
-  (pg_temp.sid('it-hakka'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Hakka', false, 6),
-  (pg_temp.sid('it-garlic'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Garlic', false, 7),
-  (pg_temp.sid('it-singapuri'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Singapuri', false, 8),
-  (pg_temp.sid('it-chilli-paneer'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Chilli Paneer', false, 9),
-  (pg_temp.sid('it-paneer-manch'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Paneer Manchurian', false, 10),
-  (pg_temp.sid('it-veg-manch'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Veg Manchurian', false, 11),
-  (pg_temp.sid('it-honey-potato'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Honey Chilli Potato', false, 12),
-  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Chilli Potato', false, 13),
-  (pg_temp.sid('it-spring-roll'), pg_temp.sid('outlet'), pg_temp.sid('cat-snacks'), 'Spring Roll', false, 14),
-  (pg_temp.sid('it-fries'), pg_temp.sid('outlet'), pg_temp.sid('cat-snacks'), 'Masala French Fries', false, 15),
-  (pg_temp.sid('it-kurkure-roll'), pg_temp.sid('outlet'), pg_temp.sid('cat-snacks'), 'Kurkure Spring Roll', false, 16);
+  (pg_temp.sid('it-veg-stm'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Veg Steam Momo', true, 1),
+  (pg_temp.sid('it-pan-stm'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Paneer Steam Momo', true, 2),
+  (pg_temp.sid('it-soy-stm'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Soya Steam Momo', true, 3),
+  (pg_temp.sid('it-veg-fry'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Veg Fried Momo', true, 4),
+  (pg_temp.sid('it-pan-fry'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Paneer Fried Momo', true, 5),
+  (pg_temp.sid('it-soy-fry'), pg_temp.sid('outlet'), pg_temp.sid('cat-momo'), 'Soya Fried Momo', true, 6),
+  (pg_temp.sid('it-veg-kur'), pg_temp.sid('outlet'), pg_temp.sid('cat-kurkure'), 'Veg Kurkure Momo', true, 7),
+  (pg_temp.sid('it-pan-kur'), pg_temp.sid('outlet'), pg_temp.sid('cat-kurkure'), 'Paneer Kurkure Momo', true, 8),
+  (pg_temp.sid('it-soy-kur'), pg_temp.sid('outlet'), pg_temp.sid('cat-kurkure'), 'Soya Kurkure Momo', true, 9),
+  (pg_temp.sid('it-veg-grv'), pg_temp.sid('outlet'), pg_temp.sid('cat-gravy'), 'Veg Gravy', true, 10),
+  (pg_temp.sid('it-pan-grv'), pg_temp.sid('outlet'), pg_temp.sid('cat-gravy'), 'Paneer Gravy', true, 11),
+  (pg_temp.sid('it-soy-grv'), pg_temp.sid('outlet'), pg_temp.sid('cat-gravy'), 'Soya Gravy', true, 12),
+  (pg_temp.sid('it-pan-sch'), pg_temp.sid('outlet'), pg_temp.sid('cat-schezwan'), 'Paneer Schezwan', true, 13),
+  (pg_temp.sid('it-soy-sch'), pg_temp.sid('outlet'), pg_temp.sid('cat-schezwan'), 'Soya Schezwan', true, 14),
+  (pg_temp.sid('it-veg-sch'), pg_temp.sid('outlet'), pg_temp.sid('cat-schezwan'), 'Veg Schezwan', true, 15),
+  (pg_temp.sid('it-nd-veg'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Noodle', false, 16),
+  (pg_temp.sid('it-nd-hakka'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Hakka Noodle', false, 17),
+  (pg_temp.sid('it-nd-singapuri'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Singapuri Noodle', false, 18),
+  (pg_temp.sid('it-nd-paneer'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Paneer Noodle', false, 19),
+  (pg_temp.sid('it-nd-garlic'), pg_temp.sid('outlet'), pg_temp.sid('cat-noodles'), 'Garlic Noodle', false, 20),
+  (pg_temp.sid('it-rc-singapuri'), pg_temp.sid('outlet'), pg_temp.sid('cat-rice'), 'Singapuri Fried Rice', false, 21),
+  (pg_temp.sid('it-rc-paneer'), pg_temp.sid('outlet'), pg_temp.sid('cat-rice'), 'Paneer Fried Rice', false, 22),
+  (pg_temp.sid('it-rc-garlic'), pg_temp.sid('outlet'), pg_temp.sid('cat-rice'), 'Garlic Fried Rice', false, 23),
+  (pg_temp.sid('it-rc-veg'), pg_temp.sid('outlet'), pg_temp.sid('cat-rice'), 'Veg Fried Rice', false, 24),
+  (pg_temp.sid('it-rc-hakka'), pg_temp.sid('outlet'), pg_temp.sid('cat-rice'), 'Hakka Fried Rice', false, 25),
+  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Chilli Potato', false, 26),
+  (pg_temp.sid('it-honey-potato'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Honey Chilli Potato', false, 27),
+  (pg_temp.sid('it-veg-manch'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Veg Manchurian', false, 28),
+  (pg_temp.sid('it-chilli-paneer'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Chilly Paneer', false, 29),
+  (pg_temp.sid('it-paneer-manch'), pg_temp.sid('outlet'), pg_temp.sid('cat-chinese'), 'Paneer Manchurian', false, 30),
+  (pg_temp.sid('it-spring-roll'), pg_temp.sid('outlet'), pg_temp.sid('cat-snacks'), 'Spring Roll', false, 31),
+  (pg_temp.sid('it-fries'), pg_temp.sid('outlet'), pg_temp.sid('cat-new'), 'Masala French Fries', false, 32),
+  (pg_temp.sid('it-kurkure-roll'), pg_temp.sid('outlet'), pg_temp.sid('cat-new'), 'Kurkure Spring Roll', false, 33);
 
 insert into public.variants (id, outlet_id, item_id, name, sort) values
-  (pg_temp.sid('pan-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Steamed · Half', 1),
-  (pg_temp.sid('pan-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Steamed · Full', 2),
-  (pg_temp.sid('pan-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Fried · Half', 3),
-  (pg_temp.sid('pan-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Fried · Full', 4),
-  (pg_temp.sid('pan-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Kurkure · Half', 5),
-  (pg_temp.sid('pan-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Kurkure · Full', 6),
-  (pg_temp.sid('pan-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Gravy/Schezwan · Half', 7),
-  (pg_temp.sid('pan-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-momos'), 'Gravy/Schezwan · Full', 8),
-  (pg_temp.sid('veg-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Steamed · Half', 1),
-  (pg_temp.sid('veg-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Steamed · Full', 2),
-  (pg_temp.sid('veg-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Fried · Half', 3),
-  (pg_temp.sid('veg-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Fried · Full', 4),
-  (pg_temp.sid('veg-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Kurkure · Half', 5),
-  (pg_temp.sid('veg-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Kurkure · Full', 6),
-  (pg_temp.sid('veg-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Gravy/Schezwan · Half', 7),
-  (pg_temp.sid('veg-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-momos'), 'Gravy/Schezwan · Full', 8),
-  (pg_temp.sid('soy-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Steamed · Half', 1),
-  (pg_temp.sid('soy-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Steamed · Full', 2),
-  (pg_temp.sid('soy-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Fried · Half', 3),
-  (pg_temp.sid('soy-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Fried · Full', 4),
-  (pg_temp.sid('soy-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Kurkure · Half', 5),
-  (pg_temp.sid('soy-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Kurkure · Full', 6),
-  (pg_temp.sid('soy-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Gravy/Schezwan · Half', 7),
-  (pg_temp.sid('soy-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-momos'), 'Gravy/Schezwan · Full', 8),
-  (pg_temp.sid('veg-nr-nd-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-nr'), 'Noodles · Half', 1),
-  (pg_temp.sid('veg-nr-nd-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-nr'), 'Noodles · Full', 2),
-  (pg_temp.sid('veg-nr-rc-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-nr'), 'Fried Rice · Half', 3),
-  (pg_temp.sid('veg-nr-rc-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-nr'), 'Fried Rice · Full', 4),
-  (pg_temp.sid('pan-nr-nd-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-nr'), 'Noodles · Half', 1),
-  (pg_temp.sid('pan-nr-nd-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-nr'), 'Noodles · Full', 2),
-  (pg_temp.sid('pan-nr-rc-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-nr'), 'Fried Rice · Half', 3),
-  (pg_temp.sid('pan-nr-rc-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-nr'), 'Fried Rice · Full', 4),
-  (pg_temp.sid('hakka-nd-h'), pg_temp.sid('outlet'), pg_temp.sid('it-hakka'), 'Noodles · Half', 1),
-  (pg_temp.sid('hakka-nd-f'), pg_temp.sid('outlet'), pg_temp.sid('it-hakka'), 'Noodles · Full', 2),
-  (pg_temp.sid('hakka-rc-h'), pg_temp.sid('outlet'), pg_temp.sid('it-hakka'), 'Fried Rice · Half', 3),
-  (pg_temp.sid('hakka-rc-f'), pg_temp.sid('outlet'), pg_temp.sid('it-hakka'), 'Fried Rice · Full', 4),
-  (pg_temp.sid('garlic-nd-h'), pg_temp.sid('outlet'), pg_temp.sid('it-garlic'), 'Noodles · Half', 1),
-  (pg_temp.sid('garlic-nd-f'), pg_temp.sid('outlet'), pg_temp.sid('it-garlic'), 'Noodles · Full', 2),
-  (pg_temp.sid('garlic-rc-h'), pg_temp.sid('outlet'), pg_temp.sid('it-garlic'), 'Fried Rice · Half', 3),
-  (pg_temp.sid('garlic-rc-f'), pg_temp.sid('outlet'), pg_temp.sid('it-garlic'), 'Fried Rice · Full', 4),
-  (pg_temp.sid('singapuri-nd-h'), pg_temp.sid('outlet'), pg_temp.sid('it-singapuri'), 'Noodles · Half', 1),
-  (pg_temp.sid('singapuri-nd-f'), pg_temp.sid('outlet'), pg_temp.sid('it-singapuri'), 'Noodles · Full', 2),
-  (pg_temp.sid('singapuri-rc-h'), pg_temp.sid('outlet'), pg_temp.sid('it-singapuri'), 'Fried Rice · Half', 3),
-  (pg_temp.sid('singapuri-rc-f'), pg_temp.sid('outlet'), pg_temp.sid('it-singapuri'), 'Fried Rice · Full', 4),
+  (pg_temp.sid('veg-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-stm'), 'Half', 1),
+  (pg_temp.sid('veg-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-stm'), 'Full', 2),
+  (pg_temp.sid('pan-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-stm'), 'Half', 1),
+  (pg_temp.sid('pan-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-stm'), 'Full', 2),
+  (pg_temp.sid('soy-stm-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-stm'), 'Half', 1),
+  (pg_temp.sid('soy-stm-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-stm'), 'Full', 2),
+  (pg_temp.sid('veg-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-fry'), 'Half', 1),
+  (pg_temp.sid('veg-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-fry'), 'Full', 2),
+  (pg_temp.sid('pan-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-fry'), 'Half', 1),
+  (pg_temp.sid('pan-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-fry'), 'Full', 2),
+  (pg_temp.sid('soy-fry-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-fry'), 'Half', 1),
+  (pg_temp.sid('soy-fry-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-fry'), 'Full', 2),
+  (pg_temp.sid('veg-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-kur'), 'Half', 1),
+  (pg_temp.sid('veg-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-kur'), 'Full', 2),
+  (pg_temp.sid('pan-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-kur'), 'Half', 1),
+  (pg_temp.sid('pan-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-kur'), 'Full', 2),
+  (pg_temp.sid('soy-kur-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-kur'), 'Half', 1),
+  (pg_temp.sid('soy-kur-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-kur'), 'Full', 2),
+  (pg_temp.sid('veg-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-grv'), 'Half', 1),
+  (pg_temp.sid('veg-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-grv'), 'Full', 2),
+  (pg_temp.sid('pan-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-grv'), 'Half', 1),
+  (pg_temp.sid('pan-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-grv'), 'Full', 2),
+  (pg_temp.sid('soy-grv-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-grv'), 'Half', 1),
+  (pg_temp.sid('soy-grv-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-grv'), 'Full', 2),
+  (pg_temp.sid('pan-sch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-sch'), 'Half', 1),
+  (pg_temp.sid('pan-sch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-pan-sch'), 'Full', 2),
+  (pg_temp.sid('soy-sch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-sch'), 'Half', 1),
+  (pg_temp.sid('soy-sch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-soy-sch'), 'Full', 2),
+  (pg_temp.sid('veg-sch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-sch'), 'Half', 1),
+  (pg_temp.sid('veg-sch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-sch'), 'Full', 2),
+  (pg_temp.sid('nd-veg-h'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-veg'), 'Half', 1),
+  (pg_temp.sid('nd-veg-f'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-veg'), 'Full', 2),
+  (pg_temp.sid('nd-hakka-h'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-hakka'), 'Half', 1),
+  (pg_temp.sid('nd-hakka-f'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-hakka'), 'Full', 2),
+  (pg_temp.sid('nd-singapuri-h'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-singapuri'), 'Half', 1),
+  (pg_temp.sid('nd-singapuri-f'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-singapuri'), 'Full', 2),
+  (pg_temp.sid('nd-paneer-h'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-paneer'), 'Half', 1),
+  (pg_temp.sid('nd-paneer-f'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-paneer'), 'Full', 2),
+  (pg_temp.sid('nd-garlic-h'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-garlic'), 'Half', 1),
+  (pg_temp.sid('nd-garlic-f'), pg_temp.sid('outlet'), pg_temp.sid('it-nd-garlic'), 'Full', 2),
+  (pg_temp.sid('rc-singapuri-h'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-singapuri'), 'Half', 1),
+  (pg_temp.sid('rc-singapuri-f'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-singapuri'), 'Full', 2),
+  (pg_temp.sid('rc-paneer-h'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-paneer'), 'Half', 1),
+  (pg_temp.sid('rc-paneer-f'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-paneer'), 'Full', 2),
+  (pg_temp.sid('rc-garlic-h'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-garlic'), 'Half', 1),
+  (pg_temp.sid('rc-garlic-f'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-garlic'), 'Full', 2),
+  (pg_temp.sid('rc-veg-h'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-veg'), 'Half', 1),
+  (pg_temp.sid('rc-veg-f'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-veg'), 'Full', 2),
+  (pg_temp.sid('rc-hakka-h'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-hakka'), 'Half', 1),
+  (pg_temp.sid('rc-hakka-f'), pg_temp.sid('outlet'), pg_temp.sid('it-rc-hakka'), 'Full', 2),
+  (pg_temp.sid('chilli-potato-h'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-potato'), 'Half', 1),
+  (pg_temp.sid('chilli-potato-f'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-potato'), 'Full', 2),
+  (pg_temp.sid('honey-potato-h'), pg_temp.sid('outlet'), pg_temp.sid('it-honey-potato'), 'Half', 1),
+  (pg_temp.sid('honey-potato-f'), pg_temp.sid('outlet'), pg_temp.sid('it-honey-potato'), 'Full', 2),
+  (pg_temp.sid('veg-manch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-manch'), 'Half', 1),
+  (pg_temp.sid('veg-manch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-manch'), 'Full', 2),
   (pg_temp.sid('chilli-paneer-h'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-paneer'), 'Half', 1),
   (pg_temp.sid('chilli-paneer-f'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-paneer'), 'Full', 2),
   (pg_temp.sid('paneer-manch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-paneer-manch'), 'Half', 1),
   (pg_temp.sid('paneer-manch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-paneer-manch'), 'Full', 2),
-  (pg_temp.sid('veg-manch-h'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-manch'), 'Half', 1),
-  (pg_temp.sid('veg-manch-f'), pg_temp.sid('outlet'), pg_temp.sid('it-veg-manch'), 'Full', 2),
-  (pg_temp.sid('honey-potato-h'), pg_temp.sid('outlet'), pg_temp.sid('it-honey-potato'), 'Half', 1),
-  (pg_temp.sid('honey-potato-f'), pg_temp.sid('outlet'), pg_temp.sid('it-honey-potato'), 'Full', 2),
-  (pg_temp.sid('chilli-potato-h'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-potato'), 'Half', 1),
-  (pg_temp.sid('chilli-potato-f'), pg_temp.sid('outlet'), pg_temp.sid('it-chilli-potato'), 'Full', 2),
   (pg_temp.sid('spring-roll-h'), pg_temp.sid('outlet'), pg_temp.sid('it-spring-roll'), 'Half', 1),
   (pg_temp.sid('spring-roll-f'), pg_temp.sid('outlet'), pg_temp.sid('it-spring-roll'), 'Full', 2),
   (pg_temp.sid('fries-h'), pg_temp.sid('outlet'), pg_temp.sid('it-fries'), 'Half', 1),
@@ -1804,125 +2169,174 @@ insert into public.modifiers (id, outlet_id, name) values
   (pg_temp.sid('mod-no-onion'), pg_temp.sid('outlet'), 'No onion');
 
 insert into public.item_modifiers (item_id, modifier_id, sort) values
-  (pg_temp.sid('it-pan-momos'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-pan-momos'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-pan-momos'), pg_temp.sid('mod-extra-chutney'), 3),
-  (pg_temp.sid('it-veg-momos'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-veg-momos'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-veg-momos'), pg_temp.sid('mod-extra-chutney'), 3),
-  (pg_temp.sid('it-soy-momos'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-soy-momos'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-soy-momos'), pg_temp.sid('mod-extra-chutney'), 3),
-  (pg_temp.sid('it-veg-nr'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-veg-nr'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-veg-nr'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-pan-nr'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-pan-nr'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-pan-nr'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-hakka'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-hakka'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-hakka'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-garlic'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-garlic'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-garlic'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-singapuri'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-singapuri'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-singapuri'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-veg-stm'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-stm'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-stm'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-pan-stm'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-pan-stm'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-pan-stm'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-soy-stm'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-soy-stm'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-soy-stm'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-veg-fry'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-fry'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-fry'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-pan-fry'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-pan-fry'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-pan-fry'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-soy-fry'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-soy-fry'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-soy-fry'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-veg-kur'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-kur'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-kur'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-pan-kur'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-pan-kur'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-pan-kur'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-soy-kur'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-soy-kur'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-soy-kur'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-veg-grv'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-grv'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-grv'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-pan-grv'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-pan-grv'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-pan-grv'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-soy-grv'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-soy-grv'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-soy-grv'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-pan-sch'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-pan-sch'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-pan-sch'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-soy-sch'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-soy-sch'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-soy-sch'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-veg-sch'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-sch'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-sch'), pg_temp.sid('mod-extra-chutney'), 3),
+  (pg_temp.sid('it-nd-veg'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-nd-veg'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-nd-veg'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-nd-hakka'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-nd-hakka'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-nd-hakka'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-nd-singapuri'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-nd-singapuri'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-nd-singapuri'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-nd-paneer'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-nd-paneer'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-nd-paneer'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-nd-garlic'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-nd-garlic'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-nd-garlic'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-rc-singapuri'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-rc-singapuri'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-rc-singapuri'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-rc-paneer'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-rc-paneer'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-rc-paneer'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-rc-garlic'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-rc-garlic'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-rc-garlic'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-rc-veg'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-rc-veg'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-rc-veg'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-rc-hakka'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-rc-hakka'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-rc-hakka'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-no-onion'), 3),
+  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-no-onion'), 3),
   (pg_temp.sid('it-chilli-paneer'), pg_temp.sid('mod-less-spicy'), 1),
   (pg_temp.sid('it-chilli-paneer'), pg_temp.sid('mod-extra-spicy'), 2),
   (pg_temp.sid('it-chilli-paneer'), pg_temp.sid('mod-no-onion'), 3),
   (pg_temp.sid('it-paneer-manch'), pg_temp.sid('mod-less-spicy'), 1),
   (pg_temp.sid('it-paneer-manch'), pg_temp.sid('mod-extra-spicy'), 2),
   (pg_temp.sid('it-paneer-manch'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-veg-manch'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-honey-potato'), pg_temp.sid('mod-no-onion'), 3),
-  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-less-spicy'), 1),
-  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-extra-spicy'), 2),
-  (pg_temp.sid('it-chilli-potato'), pg_temp.sid('mod-no-onion'), 3);
+  (pg_temp.sid('it-spring-roll'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-spring-roll'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-fries'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-fries'), pg_temp.sid('mod-extra-spicy'), 2),
+  (pg_temp.sid('it-kurkure-roll'), pg_temp.sid('mod-less-spicy'), 1),
+  (pg_temp.sid('it-kurkure-roll'), pg_temp.sid('mod-extra-spicy'), 2);
 
 insert into public.price_history (outlet_id, ref_kind, ref_id, price_paise, cost_paise, effective_from) values
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-stm-h'), 6900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-stm-f'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-fry-h'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-fry-f'), 10900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-kur-h'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-kur-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-grv-h'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-grv-f'), 15900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-stm-h'), 5900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-stm-f'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-fry-h'), 6900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-fry-f'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-kur-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-kur-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-grv-h'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-grv-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-stm-h'), 5900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-stm-f'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-fry-h'), 6900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-fry-f'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-kur-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-kur-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-grv-h'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-grv-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-nr-nd-h'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-nr-nd-f'), 10900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-nr-rc-h'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-nr-rc-f'), 10900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-nr-nd-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-nr-nd-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-nr-rc-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-nr-rc-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('hakka-nd-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('hakka-nd-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('hakka-rc-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('hakka-rc-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('garlic-nd-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('garlic-nd-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('garlic-rc-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('garlic-rc-f'), 14900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('singapuri-nd-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('singapuri-nd-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('singapuri-rc-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('singapuri-rc-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-paneer-h'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-paneer-f'), 23900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('paneer-manch-h'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('paneer-manch-f'), 23900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-manch-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-manch-f'), 15900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('honey-potato-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('honey-potato-f'), 13900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-potato-h'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-potato-f'), 10900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('spring-roll-h'), 4900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('spring-roll-f'), 7900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('fries-h'), 6900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('fries-f'), 9900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('kurkure-roll-h'), 8900, null, now()),
-  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('kurkure-roll-f'), 13900, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-stm-h'), 6000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-stm-f'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-stm-h'), 7000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-stm-f'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-stm-h'), 6000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-stm-f'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-fry-h'), 7000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-fry-f'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-fry-h'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-fry-f'), 11000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-fry-h'), 7000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-fry-f'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-kur-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-kur-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-kur-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-kur-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-kur-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-kur-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-grv-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-grv-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-grv-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-grv-f'), 16000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-grv-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-grv-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-sch-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('pan-sch-f'), 16000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-sch-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('soy-sch-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-sch-h'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-sch-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-veg-h'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-veg-f'), 11000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-hakka-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-hakka-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-singapuri-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-singapuri-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-paneer-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-paneer-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-garlic-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('nd-garlic-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-singapuri-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-singapuri-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-paneer-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-paneer-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-garlic-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-garlic-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-veg-h'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-veg-f'), 11000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-hakka-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('rc-hakka-f'), 15000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-potato-h'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-potato-f'), 11000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('honey-potato-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('honey-potato-f'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-manch-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('veg-manch-f'), 16000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-paneer-h'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('chilli-paneer-f'), 24000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('paneer-manch-h'), 14000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('paneer-manch-f'), 24000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('spring-roll-h'), 5000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('spring-roll-f'), 8000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('fries-h'), 7000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('fries-f'), 10000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('kurkure-roll-h'), 9000, null, now()),
+  (pg_temp.sid('outlet'), 'variant', pg_temp.sid('kurkure-roll-f'), 14000, null, now()),
   (pg_temp.sid('outlet'), 'modifier', pg_temp.sid('mod-less-spicy'), 0, null, now()),
   (pg_temp.sid('outlet'), 'modifier', pg_temp.sid('mod-extra-spicy'), 0, null, now()),
   (pg_temp.sid('outlet'), 'modifier', pg_temp.sid('mod-extra-chutney'), 0, null, now()),
   (pg_temp.sid('outlet'), 'modifier', pg_temp.sid('mod-no-onion'), 0, null, now());
-
-insert into public.favourites (outlet_id, ref_id, sort) values
-  (pg_temp.sid('outlet'), pg_temp.sid('veg-stm-f'), 1),
-  (pg_temp.sid('outlet'), pg_temp.sid('pan-stm-f'), 2),
-  (pg_temp.sid('outlet'), pg_temp.sid('veg-fry-f'), 3),
-  (pg_temp.sid('outlet'), pg_temp.sid('pan-fry-f'), 4),
-  (pg_temp.sid('outlet'), pg_temp.sid('pan-kur-f'), 5),
-  (pg_temp.sid('outlet'), pg_temp.sid('veg-kur-f'), 6),
-  (pg_temp.sid('outlet'), pg_temp.sid('veg-stm-h'), 7),
-  (pg_temp.sid('outlet'), pg_temp.sid('pan-grv-f'), 8),
-  (pg_temp.sid('outlet'), pg_temp.sid('hakka-nd-f'), 9),
-  (pg_temp.sid('outlet'), pg_temp.sid('veg-nr-nd-f'), 10),
-  (pg_temp.sid('outlet'), pg_temp.sid('chilli-paneer-h'), 11),
-  (pg_temp.sid('outlet'), pg_temp.sid('honey-potato-h'), 12);
 
 -- ---------------------------------------------------------------- your details (edit, then run)
 -- 1. Link your email so you can sign in to /admin:

@@ -1,4 +1,5 @@
 {
+ "menuName": "menu-v2",
  "outlet": {
   "name": "Street Heaven",
   "addressLine": "Near Ashiana Gol Chakkar, Raj Nagar Extension",
@@ -8,12 +9,28 @@
  },
  "categories": [
   {
-   "key": "momos",
-   "name": "Momos"
+   "key": "momo",
+   "name": "Momo"
+  },
+  {
+   "key": "kurkure",
+   "name": "Kurkure Momos"
+  },
+  {
+   "key": "gravy",
+   "name": "Gravy Momos"
+  },
+  {
+   "key": "schezwan",
+   "name": "Schezwan Momo"
   },
   {
    "key": "noodles",
-   "name": "Noodles / Rice"
+   "name": "Noodles"
+  },
+  {
+   "key": "rice",
+   "name": "Fried Rice"
   },
   {
    "key": "chinese",
@@ -22,6 +39,10 @@
   {
    "key": "snacks",
    "name": "Snacks"
+  },
+  {
+   "key": "new",
+   "name": "New Entries"
   }
  ],
  "modifiers": [
@@ -48,70 +69,9 @@
  ],
  "items": [
   {
-   "key": "it-pan-momos",
-   "category": "momos",
-   "name": "Paneer Momos",
-   "batchCooked": true,
-   "modifiers": [
-    "less-spicy",
-    "extra-spicy",
-    "extra-chutney"
-   ],
-   "variants": [
-    {
-     "key": "pan-stm-h",
-     "name": "Steamed · Half",
-     "price": 69,
-     "demoCost": 26
-    },
-    {
-     "key": "pan-stm-f",
-     "name": "Steamed · Full",
-     "price": 99,
-     "demoCost": 38
-    },
-    {
-     "key": "pan-fry-h",
-     "name": "Fried · Half",
-     "price": 79,
-     "demoCost": 30
-    },
-    {
-     "key": "pan-fry-f",
-     "name": "Fried · Full",
-     "price": 109,
-     "demoCost": 41
-    },
-    {
-     "key": "pan-kur-h",
-     "name": "Kurkure · Half",
-     "price": 99,
-     "demoCost": 38
-    },
-    {
-     "key": "pan-kur-f",
-     "name": "Kurkure · Full",
-     "price": 149,
-     "demoCost": 57
-    },
-    {
-     "key": "pan-grv-h",
-     "name": "Gravy/Schezwan · Half",
-     "price": 99,
-     "demoCost": 38
-    },
-    {
-     "key": "pan-grv-f",
-     "name": "Gravy/Schezwan · Full",
-     "price": 159,
-     "demoCost": 60
-    }
-   ]
-  },
-  {
-   "key": "it-veg-momos",
-   "category": "momos",
-   "name": "Veg Momos",
+   "key": "it-veg-stm",
+   "category": "momo",
+   "name": "Veg Steam Momo",
    "batchCooked": true,
    "modifiers": [
     "less-spicy",
@@ -121,58 +81,47 @@
    "variants": [
     {
      "key": "veg-stm-h",
-     "name": "Steamed · Half",
-     "price": 59,
-     "demoCost": 22
+     "name": "Half",
+     "price": 60,
+     "demoCost": 24
     },
     {
      "key": "veg-stm-f",
-     "name": "Steamed · Full",
-     "price": 79,
-     "demoCost": 30
-    },
-    {
-     "key": "veg-fry-h",
-     "name": "Fried · Half",
-     "price": 69,
-     "demoCost": 26
-    },
-    {
-     "key": "veg-fry-f",
-     "name": "Fried · Full",
-     "price": 89,
-     "demoCost": 34
-    },
-    {
-     "key": "veg-kur-h",
-     "name": "Kurkure · Half",
-     "price": 89,
-     "demoCost": 34
-    },
-    {
-     "key": "veg-kur-f",
-     "name": "Kurkure · Full",
-     "price": 139,
-     "demoCost": 53
-    },
-    {
-     "key": "veg-grv-h",
-     "name": "Gravy/Schezwan · Half",
-     "price": 99,
-     "demoCost": 38
-    },
-    {
-     "key": "veg-grv-f",
-     "name": "Gravy/Schezwan · Full",
-     "price": 149,
-     "demoCost": 57
+     "name": "Full",
+     "price": 80,
+     "demoCost": 32
     }
    ]
   },
   {
-   "key": "it-soy-momos",
-   "category": "momos",
-   "name": "Soya Momos",
+   "key": "it-pan-stm",
+   "category": "momo",
+   "name": "Paneer Steam Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "pan-stm-h",
+     "name": "Half",
+     "price": 70,
+     "demoCost": 28
+    },
+    {
+     "key": "pan-stm-f",
+     "name": "Full",
+     "price": 100,
+     "demoCost": 40
+    }
+   ]
+  },
+  {
+   "key": "it-soy-stm",
+   "category": "momo",
+   "name": "Soya Steam Momo",
    "batchCooked": true,
    "modifiers": [
     "less-spicy",
@@ -182,58 +131,322 @@
    "variants": [
     {
      "key": "soy-stm-h",
-     "name": "Steamed · Half",
-     "price": 59,
-     "demoCost": 22
+     "name": "Half",
+     "price": 60,
+     "demoCost": 24
     },
     {
      "key": "soy-stm-f",
-     "name": "Steamed · Full",
-     "price": 79,
-     "demoCost": 30
+     "name": "Full",
+     "price": 80,
+     "demoCost": 32
+    }
+   ]
+  },
+  {
+   "key": "it-veg-fry",
+   "category": "momo",
+   "name": "Veg Fried Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "veg-fry-h",
+     "name": "Half",
+     "price": 70,
+     "demoCost": 28
     },
     {
+     "key": "veg-fry-f",
+     "name": "Full",
+     "price": 90,
+     "demoCost": 36
+    }
+   ]
+  },
+  {
+   "key": "it-pan-fry",
+   "category": "momo",
+   "name": "Paneer Fried Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "pan-fry-h",
+     "name": "Half",
+     "price": 80,
+     "demoCost": 32
+    },
+    {
+     "key": "pan-fry-f",
+     "name": "Full",
+     "price": 110,
+     "demoCost": 44
+    }
+   ]
+  },
+  {
+   "key": "it-soy-fry",
+   "category": "momo",
+   "name": "Soya Fried Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
      "key": "soy-fry-h",
-     "name": "Fried · Half",
-     "price": 69,
-     "demoCost": 26
+     "name": "Half",
+     "price": 70,
+     "demoCost": 28
     },
     {
      "key": "soy-fry-f",
-     "name": "Fried · Full",
-     "price": 89,
-     "demoCost": 34
+     "name": "Full",
+     "price": 90,
+     "demoCost": 36
+    }
+   ]
+  },
+  {
+   "key": "it-veg-kur",
+   "category": "kurkure",
+   "name": "Veg Kurkure Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "veg-kur-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
+     "key": "veg-kur-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
+    }
+   ]
+  },
+  {
+   "key": "it-pan-kur",
+   "category": "kurkure",
+   "name": "Paneer Kurkure Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "pan-kur-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
+    },
+    {
+     "key": "pan-kur-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-soy-kur",
+   "category": "kurkure",
+   "name": "Soya Kurkure Momo",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
      "key": "soy-kur-h",
-     "name": "Kurkure · Half",
-     "price": 89,
-     "demoCost": 34
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
      "key": "soy-kur-f",
-     "name": "Kurkure · Full",
-     "price": 139,
-     "demoCost": 53
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
+    }
+   ]
+  },
+  {
+   "key": "it-veg-grv",
+   "category": "gravy",
+   "name": "Veg Gravy",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "veg-grv-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
     },
     {
+     "key": "veg-grv-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-pan-grv",
+   "category": "gravy",
+   "name": "Paneer Gravy",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "pan-grv-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
+    },
+    {
+     "key": "pan-grv-f",
+     "name": "Full",
+     "price": 160,
+     "demoCost": 64
+    }
+   ]
+  },
+  {
+   "key": "it-soy-grv",
+   "category": "gravy",
+   "name": "Soya Gravy",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
      "key": "soy-grv-h",
-     "name": "Gravy/Schezwan · Half",
-     "price": 99,
-     "demoCost": 38
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
     },
     {
      "key": "soy-grv-f",
-     "name": "Gravy/Schezwan · Full",
-     "price": 149,
-     "demoCost": 57
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
     }
    ]
   },
   {
-   "key": "it-veg-nr",
+   "key": "it-pan-sch",
+   "category": "schezwan",
+   "name": "Paneer Schezwan",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "pan-sch-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
+    },
+    {
+     "key": "pan-sch-f",
+     "name": "Full",
+     "price": 160,
+     "demoCost": 64
+    }
+   ]
+  },
+  {
+   "key": "it-soy-sch",
+   "category": "schezwan",
+   "name": "Soya Schezwan",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "soy-sch-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
+    },
+    {
+     "key": "soy-sch-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-veg-sch",
+   "category": "schezwan",
+   "name": "Veg Schezwan",
+   "batchCooked": true,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "extra-chutney"
+   ],
+   "variants": [
+    {
+     "key": "veg-sch-h",
+     "name": "Half",
+     "price": 100,
+     "demoCost": 40
+    },
+    {
+     "key": "veg-sch-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-nd-veg",
    "category": "noodles",
-   "name": "Veg",
+   "name": "Noodle",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -242,35 +455,23 @@
    ],
    "variants": [
     {
-     "key": "veg-nr-nd-h",
-     "name": "Noodles · Half",
-     "price": 79,
-     "demoCost": 28
+     "key": "nd-veg-h",
+     "name": "Half",
+     "price": 80,
+     "demoCost": 32
     },
     {
-     "key": "veg-nr-nd-f",
-     "name": "Noodles · Full",
-     "price": 109,
-     "demoCost": 38
-    },
-    {
-     "key": "veg-nr-rc-h",
-     "name": "Fried Rice · Half",
-     "price": 79,
-     "demoCost": 28
-    },
-    {
-     "key": "veg-nr-rc-f",
-     "name": "Fried Rice · Full",
-     "price": 109,
-     "demoCost": 38
+     "key": "nd-veg-f",
+     "name": "Full",
+     "price": 110,
+     "demoCost": 44
     }
    ]
   },
   {
-   "key": "it-pan-nr",
+   "key": "it-nd-hakka",
    "category": "noodles",
-   "name": "Paneer",
+   "name": "Hakka Noodle",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -279,35 +480,23 @@
    ],
    "variants": [
     {
-     "key": "pan-nr-nd-h",
-     "name": "Noodles · Half",
-     "price": 89,
-     "demoCost": 31
+     "key": "nd-hakka-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "pan-nr-nd-f",
-     "name": "Noodles · Full",
-     "price": 139,
-     "demoCost": 49
-    },
-    {
-     "key": "pan-nr-rc-h",
-     "name": "Fried Rice · Half",
-     "price": 89,
-     "demoCost": 31
-    },
-    {
-     "key": "pan-nr-rc-f",
-     "name": "Fried Rice · Full",
-     "price": 139,
-     "demoCost": 49
+     "key": "nd-hakka-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
     }
    ]
   },
   {
-   "key": "it-hakka",
+   "key": "it-nd-singapuri",
    "category": "noodles",
-   "name": "Hakka",
+   "name": "Singapuri Noodle",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -316,35 +505,23 @@
    ],
    "variants": [
     {
-     "key": "hakka-nd-h",
-     "name": "Noodles · Half",
-     "price": 89,
-     "demoCost": 31
+     "key": "nd-singapuri-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "hakka-nd-f",
-     "name": "Noodles · Full",
-     "price": 149,
-     "demoCost": 52
-    },
-    {
-     "key": "hakka-rc-h",
-     "name": "Fried Rice · Half",
-     "price": 89,
-     "demoCost": 31
-    },
-    {
-     "key": "hakka-rc-f",
-     "name": "Fried Rice · Full",
-     "price": 149,
-     "demoCost": 52
+     "key": "nd-singapuri-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
     }
    ]
   },
   {
-   "key": "it-garlic",
+   "key": "it-nd-paneer",
    "category": "noodles",
-   "name": "Garlic",
+   "name": "Paneer Noodle",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -353,35 +530,23 @@
    ],
    "variants": [
     {
-     "key": "garlic-nd-h",
-     "name": "Noodles · Half",
-     "price": 89,
-     "demoCost": 31
+     "key": "nd-paneer-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "garlic-nd-f",
-     "name": "Noodles · Full",
-     "price": 149,
-     "demoCost": 52
-    },
-    {
-     "key": "garlic-rc-h",
-     "name": "Fried Rice · Half",
-     "price": 89,
-     "demoCost": 31
-    },
-    {
-     "key": "garlic-rc-f",
-     "name": "Fried Rice · Full",
-     "price": 149,
-     "demoCost": 52
+     "key": "nd-paneer-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
     }
    ]
   },
   {
-   "key": "it-singapuri",
+   "key": "it-nd-garlic",
    "category": "noodles",
-   "name": "Singapuri",
+   "name": "Garlic Noodle",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -390,35 +555,223 @@
    ],
    "variants": [
     {
-     "key": "singapuri-nd-h",
-     "name": "Noodles · Half",
-     "price": 89,
-     "demoCost": 31
+     "key": "nd-garlic-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "singapuri-nd-f",
-     "name": "Noodles · Full",
-     "price": 139,
-     "demoCost": 49
+     "key": "nd-garlic-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-rc-singapuri",
+   "category": "rice",
+   "name": "Singapuri Fried Rice",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "rc-singapuri-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "singapuri-rc-h",
-     "name": "Fried Rice · Half",
-     "price": 89,
-     "demoCost": 31
+     "key": "rc-singapuri-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
+    }
+   ]
+  },
+  {
+   "key": "it-rc-paneer",
+   "category": "rice",
+   "name": "Paneer Fried Rice",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "rc-paneer-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
     },
     {
-     "key": "singapuri-rc-f",
-     "name": "Fried Rice · Full",
-     "price": 139,
-     "demoCost": 49
+     "key": "rc-paneer-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
+    }
+   ]
+  },
+  {
+   "key": "it-rc-garlic",
+   "category": "rice",
+   "name": "Garlic Fried Rice",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "rc-garlic-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
+    },
+    {
+     "key": "rc-garlic-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-rc-veg",
+   "category": "rice",
+   "name": "Veg Fried Rice",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "rc-veg-h",
+     "name": "Half",
+     "price": 80,
+     "demoCost": 32
+    },
+    {
+     "key": "rc-veg-f",
+     "name": "Full",
+     "price": 110,
+     "demoCost": 44
+    }
+   ]
+  },
+  {
+   "key": "it-rc-hakka",
+   "category": "rice",
+   "name": "Hakka Fried Rice",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "rc-hakka-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
+    },
+    {
+     "key": "rc-hakka-f",
+     "name": "Full",
+     "price": 150,
+     "demoCost": 60
+    }
+   ]
+  },
+  {
+   "key": "it-chilli-potato",
+   "category": "chinese",
+   "name": "Chilli Potato",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "chilli-potato-h",
+     "name": "Half",
+     "price": 80,
+     "demoCost": 32
+    },
+    {
+     "key": "chilli-potato-f",
+     "name": "Full",
+     "price": 110,
+     "demoCost": 44
+    }
+   ]
+  },
+  {
+   "key": "it-honey-potato",
+   "category": "chinese",
+   "name": "Honey Chilli Potato",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "honey-potato-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
+    },
+    {
+     "key": "honey-potato-f",
+     "name": "Full",
+     "price": 140,
+     "demoCost": 56
+    }
+   ]
+  },
+  {
+   "key": "it-veg-manch",
+   "category": "chinese",
+   "name": "Veg Manchurian",
+   "batchCooked": false,
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy",
+    "no-onion"
+   ],
+   "variants": [
+    {
+     "key": "veg-manch-h",
+     "name": "Half",
+     "price": 90,
+     "demoCost": 36
+    },
+    {
+     "key": "veg-manch-f",
+     "name": "Full",
+     "price": 160,
+     "demoCost": 64
     }
    ]
   },
   {
    "key": "it-chilli-paneer",
    "category": "chinese",
-   "name": "Chilli Paneer",
+   "name": "Chilly Paneer",
    "batchCooked": false,
    "modifiers": [
     "less-spicy",
@@ -429,13 +782,13 @@
     {
      "key": "chilli-paneer-h",
      "name": "Half",
-     "price": 139,
+     "price": 140,
      "demoCost": 56
     },
     {
      "key": "chilli-paneer-f",
      "name": "Full",
-     "price": 239,
+     "price": 240,
      "demoCost": 96
     }
    ]
@@ -454,89 +807,14 @@
     {
      "key": "paneer-manch-h",
      "name": "Half",
-     "price": 139,
+     "price": 140,
      "demoCost": 56
     },
     {
      "key": "paneer-manch-f",
      "name": "Full",
-     "price": 239,
+     "price": 240,
      "demoCost": 96
-    }
-   ]
-  },
-  {
-   "key": "it-veg-manch",
-   "category": "chinese",
-   "name": "Veg Manchurian",
-   "batchCooked": false,
-   "modifiers": [
-    "less-spicy",
-    "extra-spicy",
-    "no-onion"
-   ],
-   "variants": [
-    {
-     "key": "veg-manch-h",
-     "name": "Half",
-     "price": 89,
-     "demoCost": 36
-    },
-    {
-     "key": "veg-manch-f",
-     "name": "Full",
-     "price": 159,
-     "demoCost": 64
-    }
-   ]
-  },
-  {
-   "key": "it-honey-potato",
-   "category": "chinese",
-   "name": "Honey Chilli Potato",
-   "batchCooked": false,
-   "modifiers": [
-    "less-spicy",
-    "extra-spicy",
-    "no-onion"
-   ],
-   "variants": [
-    {
-     "key": "honey-potato-h",
-     "name": "Half",
-     "price": 89,
-     "demoCost": 36
-    },
-    {
-     "key": "honey-potato-f",
-     "name": "Full",
-     "price": 139,
-     "demoCost": 56
-    }
-   ]
-  },
-  {
-   "key": "it-chilli-potato",
-   "category": "chinese",
-   "name": "Chilli Potato",
-   "batchCooked": false,
-   "modifiers": [
-    "less-spicy",
-    "extra-spicy",
-    "no-onion"
-   ],
-   "variants": [
-    {
-     "key": "chilli-potato-h",
-     "name": "Half",
-     "price": 79,
-     "demoCost": 32
-    },
-    {
-     "key": "chilli-potato-f",
-     "name": "Full",
-     "price": 109,
-     "demoCost": 44
     }
    ]
   },
@@ -545,77 +823,73 @@
    "category": "snacks",
    "name": "Spring Roll",
    "batchCooked": false,
-   "modifiers": [],
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy"
+   ],
    "variants": [
     {
      "key": "spring-roll-h",
      "name": "Half",
-     "price": 49,
+     "price": 50,
      "demoCost": 20
     },
     {
      "key": "spring-roll-f",
      "name": "Full",
-     "price": 79,
+     "price": 80,
      "demoCost": 32
     }
    ]
   },
   {
    "key": "it-fries",
-   "category": "snacks",
+   "category": "new",
    "name": "Masala French Fries",
    "batchCooked": false,
-   "modifiers": [],
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy"
+   ],
    "variants": [
     {
      "key": "fries-h",
      "name": "Half",
-     "price": 69,
-     "demoCost": null
+     "price": 70,
+     "demoCost": 28
     },
     {
      "key": "fries-f",
      "name": "Full",
-     "price": 99,
-     "demoCost": null
+     "price": 100,
+     "demoCost": 40
     }
    ]
   },
   {
    "key": "it-kurkure-roll",
-   "category": "snacks",
+   "category": "new",
    "name": "Kurkure Spring Roll",
    "batchCooked": false,
-   "modifiers": [],
+   "modifiers": [
+    "less-spicy",
+    "extra-spicy"
+   ],
    "variants": [
     {
      "key": "kurkure-roll-h",
      "name": "Half",
-     "price": 89,
-     "demoCost": null
+     "price": 90,
+     "demoCost": 36
     },
     {
      "key": "kurkure-roll-f",
      "name": "Full",
-     "price": 139,
-     "demoCost": null
+     "price": 140,
+     "demoCost": 56
     }
    ]
   }
  ],
- "favourites": [
-  "veg-stm-f",
-  "pan-stm-f",
-  "veg-fry-f",
-  "pan-fry-f",
-  "pan-kur-f",
-  "veg-kur-f",
-  "veg-stm-h",
-  "pan-grv-f",
-  "hakka-nd-f",
-  "veg-nr-nd-f",
-  "chilli-paneer-h",
-  "honey-potato-h"
- ]
+ "favourites": []
 }

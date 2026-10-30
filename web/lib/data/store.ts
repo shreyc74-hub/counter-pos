@@ -69,6 +69,16 @@ export interface PosStore {
   listCashMovements(daySessionId: string): Promise<CashMovement[]>;
 
   setSoldOut(sellableId: string, soldOut: boolean): Promise<void>;
+
+  /** Dish photos. `have` lists the ones this device already has ({itemId: updatedAt}); their data comes back null. */
+  itemPhotos?(have: Record<string, string>): Promise<ItemPhoto[]>;
+}
+
+export interface ItemPhoto {
+  itemId: string;
+  updatedAt: string;
+  /** A data: URL, or null when the device already has this version. */
+  data: string | null;
 }
 
 export interface OwnerApproval {

@@ -36,6 +36,23 @@ edit the menu. Menu changes made there show up on the demo counter in the same b
 - **Menu & prices:** categories, items, sizes, add-ons, combos, and the counter's
   Favourites tiles. Prices and costs show the margin as you type; every change is kept
   in the price history, and old bills keep the price they were sold at.
+- **Dish photos:** in Menu & prices, tap **+ Photo** next to a dish and take or pick a
+  photo (works from the tablet or a phone). It is shrunk on the device (a camera photo
+  becomes ~10–60 KB) and shows on that dish's Half and Full tiles after the counter
+  reloads. **Remove** takes it off again.
+
+## Counter screen layout
+
+Built for the realme Pad Mini (RMP2105) held upright (Chrome: 601 × 838), copying the
+old POS: sections down the left, Half | Full tiles (one tap adds), and an order bar with
+the total, **Dine in / Takeaway** and **Confirm order**, which slides up the cart
+(Less spicy / Extra spicy on each item, discount, note, CASH / UPI). The ☰ button holds
+Orders today, Expense / cash, Close day, Printer and today's totals. Counter orders need
+Dine in or Takeaway before payment; it is printed big on the receipt.
+
+**To change the layout** (sidebar width, tiles per row, tile height, font sizes,
+colours), edit the numbers at the top of [`web/app/pos-layout.css`](web/app/pos-layout.css);
+the notes there explain each one and how to preview a tablet size on a computer.
 
 ## Printing to the thermal printer
 
@@ -64,6 +81,10 @@ receipt screen shows **Retry**.
    Optional, for trying things out: `supabase/seed.sql` adds a separate demo outlet with ~90 days of fake sales.
    (If you use the Supabase CLI: run `supabase init` once, then `supabase link` and `supabase db push`.)
    **Already ran an earlier version?** Run only the migration files you haven't run yet (e.g. `…04_device_login.sql`).
+   **Live already (Street Heaven, before 30 Oct 2026)?** Run `supabase/migrations/20261030000005_service_and_photos.sql`
+   (dine in / takeaway, dish photos), then `supabase/setup/street-heaven-menu-v2.sql` (switches to the old POS's
+   sections, names and prices; old bills are untouched, old dishes are switched off, not deleted). Both are safe to run twice.
+   Then reload the counter.
 3. Add the project URL and the **anon / publishable** key (Supabase → Project settings → API keys)
    as environment variables, in Vercel (Settings → Environment Variables, tick Production, then redeploy)
    or in `web/.env.local` for local runs. Either naming works: `SUPABASE_URL` + `SUPABASE_ANON_KEY`, or
@@ -80,7 +101,9 @@ receipt screen shows **Retry**.
 
 The menu's source is `web/lib/data/menus/street-heaven.json` (see [`docs/menu.md`](docs/menu.md)).
 If it changes before go-live, edit the JSON and run `node supabase/menus/generate.mjs`.
-After go-live, change prices and costs in the admin panel.
+After go-live, change prices and costs in the admin panel. (For a big restructure, give the JSON a
+new `menuName` and run the generator: it writes `supabase/setup/street-heaven-<menuName>.sql`, which
+switches a live outlet over without touching saved bills.)
 
 ### Devices and sign-in
 

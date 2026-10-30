@@ -6,6 +6,8 @@ export type Paise = number;
 export type Role = "owner" | "cashier";
 export type Channel = "counter" | "swiggy" | "zomato" | "phone";
 export type PaymentMethod = "cash" | "upi";
+/** Counter orders: eaten here or taken away. */
+export type Service = "dine_in" | "takeaway";
 
 export interface Category {
   id: string;
@@ -132,6 +134,8 @@ export interface Order {
   staffName: string;
   daySessionId: string;
   channel: Channel;
+  /** Dine in / takeaway. Null on bills from before this was asked, and on delivery orders. */
+  service?: Service | null;
   externalOrderId: string | null;
   note: string | null;
   lines: OrderLine[];

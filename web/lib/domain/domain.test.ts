@@ -161,3 +161,20 @@ describe("Supabase URL setting", () => {
     expect(normalizeSupabaseUrl("")).toBeNull();
   });
 });
+
+describe("Half / Full dishes", () => {
+  const menu = {
+    ...demoMenu,
+    items: [...demoMenu.items, { id: "it-x", categoryId: "cat-momos", name: "Veg Steam Momo", batchCooked: true, modifierIds: [], sort: 9 }],
+    variants: [...demoMenu.variants, { id: "x-h", itemId: "it-x", name: "Half", pricePaise: 6000, costPaise: null, active: true, sort: 1 }],
+  };
+  it("puts the size first, like the old POS: 'Half Veg Steam Momo'", () => {
+    const s = findSellable(menu, "x-h")!;
+    expect(s.title).toBe("Half Veg Steam Momo");
+    expect(s.subtitle).toBe("");
+    expect(addToCart([], s, "k")[0].name).toBe("Half Veg Steam Momo");
+  });
+  it("keeps other option names after the dish", () => {
+    expect(addToCart([], findSellable(demoMenu, "v-veg-stm-full")!, "k")[0].name).toBe("Veg Momos Steamed Full");
+  });
+});

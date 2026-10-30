@@ -15,7 +15,7 @@ import {
   totalPaise,
 } from "@/lib/domain/cart";
 import { formatRupees, rupeesToPaise } from "@/lib/domain/money";
-import type { Channel, Discount, Item, Menu, Modifier, OrderLine, Outlet, Payment, Staff } from "@/lib/domain/types";
+import type { Channel, Discount, Menu, Modifier, OrderLine, Outlet, Payment, Service, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
 import type { OwnerApproval } from "@/lib/data/store";
 import { PinPad, Sheet, errorText } from "./ui";
@@ -24,6 +24,7 @@ export interface OrderDraft {
   lines: OrderLine[];
   discount: Discount | null;
   channel: Channel;
+  service: Service | null;
   externalOrderId: string | null;
   note: string | null;
 }
@@ -34,6 +35,8 @@ interface Props {
   staff: Staff;
   soldOut: Set<string>;
   nextToken: number | null;
+  /** Dish photos by item id (only dishes that have one). */
+  photos?: Record<string, string>;
   onToggleSoldOut: (sellableId: string, soldOut: boolean) => void;
   approveAsOwner: (pin: string) => Promise<OwnerApproval | null>;
   /** Saves the bill. Resolves once it is stored. */
@@ -47,28 +50,32 @@ const DISCOUNT_REASONS = ["Staff meal", "Regular customer", "Complaint", "Other"
 
 export function OrderScreen(props: Props) {
   const { menu, soldOut } = props;
-  const [tab, setTab] = useState<string>("fav");
   const [lines, setLines] = useState<OrderLine[]>([]);
   const [discount, setDiscount] = useState<Discount | null>(null);
   const [channel, setChannel] = useState<Channel>("counter");
+  const [service, setService] = useState<Service | null>(null);
+  // Phones and portrait tablets: the cart opens as a panel from the order bar (see pos-layout.css).
+  const [cartOpen, setCartOpen] = useState(false);
   const [externalId, setExternalId] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [markMode, setMarkMode] = useState(false);
-  const [itemSheet, setItemSheet] = useState<Item | null>(null);
   const [lineSheet, setLineSheet] = useState<OrderLine | null>(null);
   const [showDiscount, setShowDiscount] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [showCash, setShowCash] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Sections down the side, in the menu's order (like the old POS). Favourites and combos
+  // only appear when the menu has some.
   const tabs: Tab[] = useMemo(
     () => [
-      { id: "fav", label: "Favourites" },
+      ...(menu.favourites.length ? [{ id: "fav", label: "Favourites" }] : []),
       ...[...menu.categories].sort((a, b) => a.sort - b.sort).map((c) => ({ id: c.id, label: c.name })),
       ...(menu.combos.some((c) => c.active) ? [{ id: "combos", label: "Combos" }] : []),
     ],
     [menu],
   );
+  const [tab, setTab] = useState<string>(() => tabs[0]?.id ?? "");
 
   const subtotal = subtotalPaise(lines);
   const total = totalPaise(lines, discount?.amountPaise ?? 0);
@@ -86,8 +93,12 @@ export function OrderScreen(props: Props) {
     setDiscount(null);
     setNote(null);
     setChannel("counter");
+    setService(null);
     setExternalId("");
   };
+
+  // Counter orders must say dine in or takeaway before payment (delivery orders don't).
+  const needService = channel === "counter" && !service;
 
   const submit = async (payments: Payment[]) => {
     if (!lines.length || saving) return;
@@ -98,6 +109,7 @@ export function OrderScreen(props: Props) {
           lines,
           discount: discount && discount.amountPaise > 0 ? discount : null,
           channel,
+          service: channel === "counter" ? service : null,
           externalOrderId: channel === "swiggy" || channel === "zomato" ? externalId.trim() || null : null,
           note,
         },
@@ -106,6 +118,7 @@ export function OrderScreen(props: Props) {
       if (ok) {
         clear();
         setShowCash(false);
+        setCartOpen(false);
       }
     } finally {
       setSaving(false);
@@ -114,32 +127,18 @@ export function OrderScreen(props: Props) {
 
   return (
     <div className="order">
-      <div className="menu-pane">
-        <div className="menu-head">
-          <div className="tabs" role="toolbar" aria-label="Menu sections">
-            {tabs.map((t) => (
-              <button key={t.id} type="button" className="tab" aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="btn"
-            aria-pressed={markMode}
-            style={markMode ? { background: "var(--warn-bg)", borderColor: "var(--warn-line)" } : undefined}
-            onClick={() => setMarkMode((m) => !m)}
-          >
-            {markMode ? (
-              "Done marking"
-            ) : (
-              <>
-                <span className="label-long">Mark sold out</span>
-                <span className="label-short">Sold out</span>
-              </>
-            )}
+      <nav className="cat-list" aria-label="Menu sections">
+        {tabs.map((t) => (
+          <button key={t.id} type="button" className="cat" aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>
+            {t.label}
           </button>
-        </div>
+        ))}
+        <button type="button" className="cat cat-tool" aria-pressed={markMode} onClick={() => setMarkMode((m) => !m)}>
+          {markMode ? "Done marking" : "Mark sold out"}
+        </button>
+      </nav>
+
+      <div className="menu-pane">
         {markMode ? (
           <div className="notice small">Tap a tile to mark it sold out or back in stock. Long-press a tile also works any time.</div>
         ) : null}
@@ -148,13 +147,31 @@ export function OrderScreen(props: Props) {
           tab={tab}
           soldOut={soldOut}
           markMode={markMode}
+          photos={props.photos ?? {}}
           onTapSellable={(s) => (markMode ? props.onToggleSoldOut(s.id, !soldOut.has(s.id)) : add(s))}
           onLongPressSellable={(s) => props.onToggleSoldOut(s.id, !soldOut.has(s.id))}
-          onTapItem={(item) => setItemSheet(item)}
         />
       </div>
 
-      <aside className="cart" aria-label="Current order">
+      {/* Phones and portrait tablets: what's in the order so far, and the way into the cart. */}
+      <div className="order-bar">
+        <span className="order-bar-summary">
+          {lines.length ? (
+            <>
+              <strong>{formatRupees(total)}</strong> · {itemCount(lines)} item{itemCount(lines) === 1 ? "" : "s"}
+            </>
+          ) : (
+            "No items added yet"
+          )}
+        </span>
+        <ServiceToggle value={service} onChange={setService} disabled={channel !== "counter"} />
+        <button type="button" className="btn btn-confirm" disabled={!lines.length} onClick={() => setCartOpen(true)}>
+          Confirm order
+        </button>
+      </div>
+
+      {cartOpen ? <div className="cart-backdrop" onClick={() => setCartOpen(false)} /> : null}
+      <aside className={`cart${cartOpen ? " open" : ""}`} aria-label="Current order">
         <div className="cart-head">
           <div className="stack" style={{ gap: 2 }}>
             <strong style={{ fontSize: 20 }}>{props.nextToken ? `Token ${props.nextToken}` : "New order"}</strong>
@@ -162,6 +179,9 @@ export function OrderScreen(props: Props) {
               {itemCount(lines)} item{itemCount(lines) === 1 ? "" : "s"}
             </span>
           </div>
+          <button type="button" className="btn cart-close" onClick={() => setCartOpen(false)}>
+            Add more
+          </button>
           <label className="field small order-type" style={{ fontWeight: 500 }}>
             Order type
             <select
@@ -185,6 +205,11 @@ export function OrderScreen(props: Props) {
             </label>
           </div>
         ) : null}
+        {channel === "counter" ? (
+          <div className="cart-service">
+            <ServiceToggle value={service} onChange={setService} />
+          </div>
+        ) : null}
 
         <div className="cart-lines">
           {lines.length === 0 ? <div className="empty-cart">Tap items to start an order</div> : null}
@@ -202,9 +227,12 @@ export function OrderScreen(props: Props) {
                 <span>{formatRupees(lineTotalPaise(l))}</span>
               </div>
               <div className="row between">
-                <span className="small muted">
-                  {l.modifiers.length ? l.modifiers.map((m) => `+ ${m.name}${m.pricePaise ? ` ${formatRupees(m.pricePaise)}` : ""}`).join(", ") : l.kind === "variant" ? "Tap name for add-ons" : ""}
-                </span>
+                <SpiceChips
+                  menu={menu}
+                  line={l}
+                  onChange={(mods) => setLines((ls) => setLineModifiers(ls, l.key, mods))}
+                  onMore={() => setLineSheet(l)}
+                />
                 <span className="qty">
                   <button type="button" aria-label={`One less ${l.name}`} onClick={() => setLines((ls) => changeQty(ls, l.key, -1))}>
                     −
@@ -245,14 +273,15 @@ export function OrderScreen(props: Props) {
             <span style={{ fontSize: 18, fontWeight: 600 }}>Total</span>
             <strong>{formatRupees(total)}</strong>
           </div>
+          {needService && lines.length ? <div className="notice small">Choose Dine in or Takeaway to take payment.</div> : null}
           <div className="pay">
-            <button type="button" className="btn btn-cash" disabled={!lines.length || saving} onClick={() => setShowCash(true)}>
+            <button type="button" className="btn btn-cash" disabled={!lines.length || saving || needService} onClick={() => setShowCash(true)}>
               CASH
             </button>
             <button
               type="button"
               className="btn btn-upi"
-              disabled={!lines.length || saving}
+              disabled={!lines.length || saving || needService}
               onClick={() => void submit(buildPayments(total, "upi"))}
             >
               UPI
@@ -260,19 +289,6 @@ export function OrderScreen(props: Props) {
           </div>
         </div>
       </aside>
-
-      {itemSheet ? (
-        <VariantSheet
-          menu={menu}
-          item={itemSheet}
-          soldOut={soldOut}
-          onClose={() => setItemSheet(null)}
-          onPick={(s, mods) => {
-            add(s, mods);
-            setItemSheet(null);
-          }}
-        />
-      ) : null}
 
       {lineSheet ? (
         <ModifierSheet
@@ -324,62 +340,115 @@ function TileGrid({
   tab,
   soldOut,
   markMode,
+  photos,
   onTapSellable,
   onLongPressSellable,
-  onTapItem,
 }: {
   menu: Menu;
   tab: string;
   soldOut: Set<string>;
   markMode: boolean;
+  photos: Record<string, string>;
   onTapSellable: (s: Sellable) => void;
   onLongPressSellable: (s: Sellable) => void;
-  onTapItem: (item: Item) => void;
 }) {
-  if (tab === "fav" || tab === "combos") {
-    const ids =
-      tab === "fav" ? menu.favourites : menu.combos.filter((c) => c.active).map((c) => c.id);
-    const sellables = ids.map((id) => findSellable(menu, id)).filter((s): s is Sellable => !!s);
-    return (
-      <div className="tiles">
-        {sellables.map((s) => (
-          <PressTile
-            key={s.id}
-            title={s.title}
-            subtitle={s.subtitle}
-            price={formatRupees(s.pricePaise)}
-            soldOut={soldOut.has(s.id)}
-            marking={markMode}
-            onTap={() => onTapSellable(s)}
-            onLongPress={() => onLongPressSellable(s)}
-          />
-        ))}
-      </div>
-    );
-  }
-  const items = menu.items.filter((i) => i.categoryId === tab).sort((a, b) => a.sort - b.sort);
+  // One tile per option, so each tap adds straight to the order: a dish with Half and Full
+  // fills one row (Half on the left), like the old POS.
+  let ids: string[];
+  if (tab === "fav") ids = menu.favourites;
+  else if (tab === "combos") ids = menu.combos.filter((c) => c.active).map((c) => c.id);
+  else
+    ids = menu.items
+      .filter((i) => i.categoryId === tab)
+      .sort((a, b) => a.sort - b.sort)
+      .flatMap((i) =>
+        menu.variants
+          .filter((v) => v.itemId === i.id && v.active)
+          .sort((a, b) => a.sort - b.sort)
+          .map((v) => v.id),
+      );
+  const sellables = ids.map((id) => findSellable(menu, id)).filter((s): s is Sellable => !!s);
+  if (!sellables.length) return <p className="muted">Nothing in this section yet.</p>;
   return (
     <div className="tiles">
-      {items.map((item) => {
-        const variants = menu.variants.filter((v) => v.itemId === item.id && v.active);
-        if (!variants.length) return null;
-        const min = Math.min(...variants.map((v) => v.pricePaise));
-        const allOut = variants.every((v) => soldOut.has(v.id));
-        const someOut = variants.some((v) => soldOut.has(v.id));
+      {sellables.map((s) => (
+        <PressTile
+          key={s.id}
+          title={s.title}
+          subtitle={s.subtitle}
+          price={formatRupees(s.pricePaise)}
+          photo={s.kind === "variant" ? photos[s.variant.itemId] : undefined}
+          soldOut={soldOut.has(s.id)}
+          marking={markMode}
+          onTap={() => onTapSellable(s)}
+          onLongPress={() => onLongPressSellable(s)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Dine in / takeaway: one tap each, required for counter orders. */
+function ServiceToggle({ value, onChange, disabled }: { value: Service | null; onChange: (v: Service) => void; disabled?: boolean }) {
+  return (
+    <div className="service-toggle" role="group" aria-label="Dine in or takeaway">
+      {(
+        [
+          ["dine_in", "Dine in"],
+          ["takeaway", "Takeaway"],
+        ] as [Service, string][]
+      ).map(([v, label]) => (
+        <button key={v} type="button" aria-pressed={value === v} disabled={disabled} onClick={() => onChange(v)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const SPICE = /^(less|extra|more) spicy$/i;
+
+/** One-tap Less spicy / Extra spicy on a cart line (only one at a time); other add-ons via a sheet. */
+function SpiceChips({
+  menu,
+  line,
+  onChange,
+  onMore,
+}: {
+  menu: Menu;
+  line: OrderLine;
+  onChange: (mods: Modifier[]) => void;
+  onMore: () => void;
+}) {
+  const variant = line.kind === "variant" ? menu.variants.find((v) => v.id === line.refId) : undefined;
+  const item = menu.items.find((i) => i.id === variant?.itemId);
+  const allowed = (item?.modifierIds ?? []).map((id) => menu.modifiers.find((m) => m.id === id)).filter((m): m is Modifier => !!m);
+  const spice = allowed.filter((m) => SPICE.test(m.name));
+  const others = allowed.filter((m) => !SPICE.test(m.name));
+  const current = line.modifiers.map((lm) => menu.modifiers.find((m) => m.id === lm.modifierId)).filter((m): m is Modifier => !!m);
+  const otherPicked = line.modifiers.filter((m) => !SPICE.test(m.name));
+  return (
+    <span className="spice">
+      {spice.map((m) => {
+        const on = line.modifiers.some((x) => x.modifierId === m.id);
         return (
-          <PressTile
-            key={item.id}
-            title={item.name}
-            subtitle={`${variants.length} option${variants.length === 1 ? "" : "s"}${someOut && !allOut ? " · some sold out" : ""}`}
-            price={variants.length > 1 ? `from ${formatRupees(min)}` : formatRupees(min)}
-            soldOut={allOut}
-            marking={markMode}
-            onTap={() => onTapItem(item)}
-            onLongPress={() => onTapItem(item)}
-          />
+          <button
+            key={m.id}
+            type="button"
+            className="chip chip-small"
+            aria-pressed={on}
+            onClick={() => onChange(on ? current.filter((x) => x.id !== m.id) : [...current.filter((x) => !SPICE.test(x.name)), m])}
+          >
+            {m.name}
+          </button>
         );
       })}
-    </div>
+      {others.length ? (
+        <button type="button" className="chip chip-small" onClick={onMore}>
+          {otherPicked.length ? otherPicked.map((m) => `+ ${m.name}`).join(", ") : "+ More"}
+        </button>
+      ) : null}
+    </span>
   );
 }
 
@@ -388,6 +457,7 @@ function PressTile(props: {
   title: string;
   subtitle: string;
   price: string;
+  photo?: string;
   soldOut: boolean;
   marking: boolean;
   onTap: () => void;
@@ -420,75 +490,16 @@ function PressTile(props: {
         props.onTap();
       }}
     >
+      {props.photo ? <img className="tile-photo" src={props.photo} alt="" draggable={false} /> : null}
       <span className="stack" style={{ gap: 4 }}>
         <span className="tile-name">{props.title}</span>
-        <span className="tile-sub">{props.subtitle}</span>
+        {props.subtitle ? <span className="tile-sub">{props.subtitle}</span> : null}
       </span>
       <span className="tile-foot">
         <span className="tile-price">{props.price}</span>
         <span className="tile-flag">{props.soldOut ? "SOLD OUT" : ""}</span>
       </span>
     </button>
-  );
-}
-
-function VariantSheet({
-  menu,
-  item,
-  soldOut,
-  onClose,
-  onPick,
-}: {
-  menu: Menu;
-  item: Item;
-  soldOut: Set<string>;
-  onClose: () => void;
-  onPick: (s: Sellable, mods: Modifier[]) => void;
-}) {
-  const [mods, setMods] = useState<string[]>([]);
-  const variants = menu.variants.filter((v) => v.itemId === item.id && v.active).sort((a, b) => a.sort - b.sort);
-  const modifiers = item.modifierIds.map((id) => menu.modifiers.find((m) => m.id === id)).filter((m): m is Modifier => !!m);
-  return (
-    <Sheet title={item.name} onClose={onClose}>
-      {modifiers.length ? (
-        <div className="stack" style={{ gap: 8 }}>
-          <span className="small muted">Add-ons (optional, pick before the size)</span>
-          <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-            {modifiers.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className="chip"
-                aria-pressed={mods.includes(m.id)}
-                onClick={() => setMods((x) => (x.includes(m.id) ? x.filter((y) => y !== m.id) : [...x, m.id]))}
-              >
-                {m.name}
-                {m.pricePaise ? ` +${formatRupees(m.pricePaise)}` : ""}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <span className="small muted">Tap a size to add it</span>
-      <div className="option-grid">
-        {variants.map((v) => {
-          const s = findSellable(menu, v.id);
-          const out = soldOut.has(v.id);
-          return (
-            <button
-              key={v.id}
-              type="button"
-              className="option"
-              disabled={out || !s}
-              onClick={() => s && onPick(s, modifiers.filter((m) => mods.includes(m.id)))}
-            >
-              <strong>{v.name}</strong>
-              <span>{out ? "Sold out" : formatRupees(v.pricePaise)}</span>
-            </button>
-          );
-        })}
-      </div>
-    </Sheet>
   );
 }
 

@@ -271,8 +271,11 @@ export function Dashboard({ store, outletId, menu }: { store: AdminStore; outlet
 
 function computeView(facts: Facts, from: string, to: string, len: number, menu: AdminMenu | null, untilMinutes?: number) {
   const cur = inRange(facts, from, to, to === todayIst());
-  // The upsell to watch: drinks if the menu has them, otherwise snacks (spring rolls, fries).
-  const addOnCategory = menu ? (["Drinks", "Snacks"].find((n) => menu.categories.some((c) => c.name.toLowerCase() === n.toLowerCase())) ?? null) : null;
+  // The upsell to watch: drinks if the menu has them, otherwise snacks (spring rolls, fries;
+  // some are listed under "New Entries").
+  const has = (n: string) => !!menu?.categories.some((c) => c.active && c.name.toLowerCase() === n.toLowerCase());
+  const addOnCategories = has("Drinks") ? ["Drinks"] : ["Snacks", "New Entries"].filter(has);
+  const addOnCategory = addOnCategories.length ? addOnCategories.join(" + ") : null;
   const single = len === 1;
   const baseline: Summary | null = single
     ? typicalSummary(facts, from, 4, untilMinutes)
@@ -294,8 +297,8 @@ function computeView(facts: Facts, from: string, to: string, len: number, menu: 
     channels: channelMix(cur.orders),
     stockOuts: stockOutCounts(cur, menu),
     addOnCategory,
-    drinkRate: menu && addOnCategory ? attachRate(cur.orders, menu, addOnCategory) : null,
-    prevDrinkRate: menu && prevFacts && addOnCategory ? attachRate(prevFacts.orders, menu, addOnCategory) : null,
+    drinkRate: menu && addOnCategory ? attachRate(cur.orders, menu, addOnCategories) : null,
+    prevDrinkRate: menu && prevFacts && addOnCategory ? attachRate(prevFacts.orders, menu, addOnCategories) : null,
     openDay: cur.days.find((d) => d.closedAt == null) ?? null,
   };
 }

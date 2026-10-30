@@ -4,15 +4,19 @@ export type Sellable =
   | { kind: "variant"; id: string; title: string; subtitle: string; pricePaise: Paise; variant: Variant }
   | { kind: "combo"; id: string; title: string; subtitle: string; pricePaise: Paise; combo: Combo };
 
+const SIZE_WORDS = /^(half|full|small|medium|large|regular)$/i;
+
 export function findSellable(menu: Menu, id: string): Sellable | null {
   const variant = menu.variants.find((v) => v.id === id);
   if (variant) {
     const item = menu.items.find((i) => i.id === variant.itemId);
+    // Sizes read naturally in front: "Half Veg Steam Momo" (like the old POS), not "Veg Steam Momo Half".
+    const sizeFirst = SIZE_WORDS.test(variant.name);
     return {
       kind: "variant",
       id,
-      title: item?.name ?? "Item",
-      subtitle: variant.name,
+      title: sizeFirst ? `${variant.name} ${item?.name ?? "Item"}` : (item?.name ?? "Item"),
+      subtitle: sizeFirst ? "" : variant.name,
       pricePaise: variant.pricePaise,
       variant,
     };
@@ -24,10 +28,10 @@ export function findSellable(menu: Menu, id: string): Sellable | null {
   return null;
 }
 
-/** Name printed on the bill, e.g. "Veg Momos Steamed Full". */
+/** Name printed on the bill, e.g. "Veg Momos Steamed Full" or "Half Veg Steam Momo". */
 export function lineName(s: Sellable): string {
   if (s.kind === "combo") return s.title;
-  return `${s.title} ${s.subtitle.replace(/\s*·\s*/g, " ")}`;
+  return s.subtitle ? `${s.title} ${s.subtitle.replace(/\s*·\s*/g, " ")}` : s.title;
 }
 
 export function newLine(s: Sellable, key: string, modifiers: Modifier[] = []): OrderLine {

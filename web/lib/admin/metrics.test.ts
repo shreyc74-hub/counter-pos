@@ -213,7 +213,7 @@ describe("demo history on the real menu (planted patterns the dashboard must sho
   });
 
   it("snack add-on rate is around 12%", () => {
-    const r = attachRate(f.orders, real, "Snacks")!;
+    const r = attachRate(f.orders, real, ["Snacks", "New Entries"])!;
     expect(r).toBeGreaterThan(0.08);
     expect(r).toBeLessThan(0.2);
   });

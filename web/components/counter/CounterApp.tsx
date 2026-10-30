@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "@/lib/data";
+import { loadPhotos } from "@/lib/data/photos";
 import { type Bootstrap, type DeviceChoice, type PosStore, StoreError } from "@/lib/data/store";
 import { businessDate, computeDayTotals } from "@/lib/domain/billing";
 import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
@@ -40,6 +41,9 @@ export function CounterApp() {
   const [toast, setToast] = useState<string | null>(null);
   // Remounting the order screen empties its cart (used after a retried save succeeds).
   const [cartKey, setCartKey] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Dish photos (cached on this device; only new or changed ones are downloaded).
+  const [photos, setPhotos] = useState<Record<string, string>>({});
   const clearToast = useCallback(() => setToast(null), []);
 
   const loadApp = useCallback(() => {
@@ -74,7 +78,19 @@ export function CounterApp() {
     void store.logout();
     setStaff(null);
     setView("order");
+    setMenuOpen(false);
   }, [store]);
+
+  useEffect(() => {
+    if (!staff) return;
+    let cancelled = false;
+    loadPhotos(store)
+      .then((p) => !cancelled && setPhotos(p))
+      .catch(() => undefined); // photos are optional: tiles show names and prices without them
+    return () => {
+      cancelled = true;
+    };
+  }, [staff, store]);
 
   // Devices linked to one person sign straight in with their key: no PIN screen.
   const autoLogin = !!boot?.autoLogin && !!store.autoLogin;
@@ -226,6 +242,7 @@ export function CounterApp() {
       staffName: staff.name,
       daySessionId: day.id,
       channel: draft.channel,
+      service: draft.service,
       externalOrderId: draft.externalOrderId,
       note: draft.note,
       lines: draft.lines,
@@ -242,19 +259,22 @@ export function CounterApp() {
 
   const billCount = orders.filter((o) => !o.voided).length;
   const printerLabel = svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed") ? "Printer: failed" : "Printer";
-  // [view, label, shorter label for phones]
-  const nav: [View, string, string][] = [
-    ["order", "New order", "New order"],
-    ["orders", `Orders today (${billCount})`, `Orders (${billCount})`],
-    ["expense", "Expense / cash", "Expense"],
-    ["day", "Close day", "Close day"],
-    ["printer", printerLabel, printerLabel],
+  const nav: [View, string][] = [
+    ["order", "New order"],
+    ["orders", `Orders today (${billCount})`],
+    ["expense", "Expense / cash"],
+    ["day", "Close day"],
+    ["printer", printerLabel],
   ];
+  const go = (v: View) => {
+    setView(v);
+    setMenuOpen(false);
+  };
 
   return (
     <div className="screen">
       <header className="topbar">
-        <div className="row">
+        <div className="row topbar-title">
           {store.kind === "demo" ? (
             <span className="badge-demo">DEMO · not connected</span>
           ) : boot.outlet.isDemo ? (
@@ -262,23 +282,59 @@ export function CounterApp() {
           ) : null}
           <strong>{boot.outlet.name}</strong>
           <span className="muted small">
-            Device {boot.device.code} · Day {day.businessDate}
+            {boot.device.code} · {day.businessDate}
           </span>
           {day.businessDate !== businessDate() ? (
-            <button type="button" className="btn" style={{ minHeight: 36, background: "var(--warn-bg)", borderColor: "var(--warn-line)" }} onClick={() => setView("day")}>
-              This day was opened on {day.businessDate}. Close it and open today&apos;s
+            <button type="button" className="btn" style={{ minHeight: 36, background: "var(--warn-bg)", borderColor: "var(--warn-line)" }} onClick={() => go("day")}>
+              Opened on {day.businessDate}: close it
             </button>
           ) : null}
         </div>
-        {totals ? (
-          <div className="row small muted" style={{ flexWrap: "wrap" }}>
-            <span>Sales {formatRupees(totals.salesPaise)}</span>
-            <span>Cash {formatRupees(totals.cashSalesPaise)}</span>
-            <span>UPI {formatRupees(totals.upiSalesPaise)}</span>
-            <span>Drawer {formatRupees(totals.expectedCashPaise)}</span>
-          </div>
+        {view !== "order" ? (
+          <button type="button" className="btn" onClick={() => go("order")}>
+            ← New order
+          </button>
         ) : null}
+        <button type="button" className="btn menu-btn" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
+          <span aria-hidden="true">☰</span>
+          {svc.getJobs().some((j) => j.status === "failed") ? <span className="dot-bad" aria-label="printer problem" /> : null}
+        </button>
       </header>
+
+      {menuOpen ? (
+        <div className="drawer-backdrop" onClick={() => setMenuOpen(false)}>
+          <nav className="drawer" aria-label="Counter" onClick={(e) => e.stopPropagation()}>
+            <div className="row between">
+              <strong>{staff.name}</strong>
+              <button type="button" className="btn" onClick={() => setMenuOpen(false)}>
+                Close
+              </button>
+            </div>
+            {totals ? (
+              <div className="drawer-totals">
+                <span>Sales</span>
+                <strong>{formatRupees(totals.salesPaise)}</strong>
+                <span>Cash</span>
+                <strong>{formatRupees(totals.cashSalesPaise)}</strong>
+                <span>UPI</span>
+                <strong>{formatRupees(totals.upiSalesPaise)}</strong>
+                <span>Cash in drawer</span>
+                <strong>{formatRupees(totals.expectedCashPaise)}</strong>
+              </div>
+            ) : null}
+            {nav.map(([v, label]) => (
+              <button key={v} type="button" className="btn btn-big drawer-link" aria-current={view === v ? "page" : undefined} onClick={() => go(v)}>
+                {label}
+              </button>
+            ))}
+            {autoLogin ? null : (
+              <button type="button" className="btn btn-big drawer-link" onClick={lock}>
+                Lock
+              </button>
+            )}
+          </nav>
+        </div>
+      ) : null}
 
       {view === "order" ? (
         <OrderScreen
@@ -288,6 +344,7 @@ export function CounterApp() {
           staff={staff}
           soldOut={soldOut}
           nextToken={nextToken}
+          photos={photos}
           approveAsOwner={(pin) => store.approveAsOwner(pin)}
           notify={setToast}
           onToggleSoldOut={async (id, out) => {
@@ -361,20 +418,6 @@ export function CounterApp() {
       ) : null}
       {view === "printer" ? <PrinterScreen outlet={boot.outlet} /> : null}
 
-      <nav className="bottombar" aria-label="Counter">
-        {nav.map(([v, label, short]) => (
-          <button key={v} type="button" className="btn" aria-current={view === v ? "page" : undefined} onClick={() => setView(v)}>
-            <span className="label-long">{label}</span>
-            <span className="label-short">{short}</span>
-          </button>
-        ))}
-        <span className="who">{staff.name}</span>
-        {autoLogin ? null : (
-          <button type="button" className="btn" onClick={lock}>
-            Lock
-          </button>
-        )}
-      </nav>
 
       {receipt ? (
         <ReceiptSheet

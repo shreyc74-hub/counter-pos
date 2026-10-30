@@ -4,6 +4,7 @@ import {
   type Bootstrap,
   type CloseDayInput,
   type DeviceChoice,
+  type ItemPhoto,
   type OwnerApproval,
   type PosStore,
   StoreError,
@@ -206,6 +207,10 @@ export class SupabaseStore implements PosStore {
 
   async setSoldOut(sellableId: string, soldOut: boolean): Promise<void> {
     await this.rpc("pos_set_sold_out", { p_session: this.requireSession(), p_ref: sellableId, p_sold_out: soldOut });
+  }
+
+  async itemPhotos(have: Record<string, string>): Promise<ItemPhoto[]> {
+    return this.rpc<ItemPhoto[]>("pos_item_photos", { p_session: this.requireSession(), p_have: have });
   }
 
   private trackDay(d: (DaySession & { lastToken?: number }) | null): void {

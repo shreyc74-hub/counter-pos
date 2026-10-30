@@ -1,5 +1,8 @@
 # Menu: Street Heaven
 
+> **30 Oct 2026: menu v2 (D-242).** The live menu now copies the old POS: 9 sections, 33 dishes × Half/Full,
+> old POS prices (₹60/₹80…). The source is `web/lib/data/menus/street-heaven.json`; this page describes the first version.
+
 Source: the printed menu Shrey shared on 23 Oct 2026. The single source of truth in code is
 [`web/lib/data/menus/street-heaven.json`](../web/lib/data/menus/street-heaven.json).
 From it, `node supabase/menus/generate.mjs` writes the real-outlet setup script

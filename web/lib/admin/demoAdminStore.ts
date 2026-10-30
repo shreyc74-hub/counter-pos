@@ -1,5 +1,5 @@
 import { demoOutlet, demoStaff } from "@/lib/data/demoMenu";
-import { DEMO_MENU_KEY, loadDemoAdminMenu } from "@/lib/data/demoMenuStorage";
+import { DEMO_MENU_KEY, DEMO_PHOTOS_KEY, loadDemoAdminMenu, loadDemoPhotos } from "@/lib/data/demoMenuStorage";
 import { readDemoCounterState } from "@/lib/data/demoStore";
 import type { Outlet } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
@@ -93,6 +93,21 @@ export class DemoAdminStore implements AdminStore {
   async saveCombo(_o: string, c: Parameters<AdminStore["saveCombo"]>[1]): Promise<string> {
     if (!c.parts.length) throw new Error("A combo needs at least one item.");
     return this.mutate((m) => upsert(m.combos, { ...c, name: required(c.name) }));
+  }
+
+  async itemPhotos(): Promise<Record<string, string>> {
+    return loadDemoPhotos(this.s);
+  }
+
+  async setItemPhoto(_o: string, itemId: string, data: string | null): Promise<void> {
+    const all = loadDemoPhotos(this.s);
+    if (data) all[itemId] = data;
+    else delete all[itemId];
+    try {
+      this.s?.setItem(DEMO_PHOTOS_KEY, JSON.stringify(all));
+    } catch {
+      throw new Error("This browser's storage is full. Remove a photo first.");
+    }
   }
 
   async setFavourites(_o: string, ids: string[]): Promise<void> {

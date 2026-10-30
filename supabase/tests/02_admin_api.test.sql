@@ -35,17 +35,17 @@ begin
 
   menu := public.admin_menu(test.id('outlet'));
   perform test.ok(exists (select 1 from jsonb_array_elements(menu->'variants') v
-                          where v->>'id' = test.id('veg-stm-f')::text and (v->>'costPaise')::int = 3000),
+                          where v->>'id' = test.id('veg-stm-f')::text and (v->>'costPaise')::int = 3200),
                   'admin menu includes costs');
 
   -- change a price: new history row, menu version goes up, counter sees the new price
-  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-momos'),
+  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-stm'),
                                     'Steamed · Full', 2, true, 8900, 3500);
-  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-momos'),
+  perform public.admin_save_variant(test.id('outlet'), test.id('veg-stm-f'), test.id('it-veg-stm'),
                                     'Steamed · Full', 2, true, 8900, 3500);
   hist := public.admin_price_history(test.id('outlet'), test.id('veg-stm-f'));
   perform test.ok(jsonb_array_length(hist) = 2, 'a price change adds one history row (saving unchanged adds none)');
-  perform test.ok((hist->0->>'pricePaise')::int = 8900 and (hist->1->>'pricePaise')::int = 7900, 'old price kept in history');
+  perform test.ok((hist->0->>'pricePaise')::int = 8900 and (hist->1->>'pricePaise')::int = 8000, 'old price kept in history');
   perform test.ok((public.admin_menu(test.id('outlet'))->>'version')::int > (menu->>'version')::int, 'menu version goes up');
 
   -- add a category, item, size and combo

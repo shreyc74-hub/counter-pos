@@ -286,10 +286,11 @@ export function sellableName(menu: AdminMenu | null, refId: string): { name: str
  * Share of orders (0–1) that include something from a category, e.g. the
  * "drink add-on rate". Combos containing the category count too.
  */
-export function attachRate(orders: OrderFact[], menu: AdminMenu, categoryName: string): number | null {
-  const cat = menu.categories.find((c) => c.name.toLowerCase() === categoryName.toLowerCase());
-  if (!cat) return null;
-  const itemIds = new Set(menu.items.filter((i) => i.categoryId === cat.id).map((i) => i.id));
+export function attachRate(orders: OrderFact[], menu: AdminMenu, categoryNames: string | string[]): number | null {
+  const names = (Array.isArray(categoryNames) ? categoryNames : [categoryNames]).map((n) => n.toLowerCase());
+  const catIds = new Set(menu.categories.filter((c) => names.includes(c.name.toLowerCase())).map((c) => c.id));
+  if (!catIds.size) return null;
+  const itemIds = new Set(menu.items.filter((i) => catIds.has(i.categoryId)).map((i) => i.id));
   const variantIds = new Set(menu.variants.filter((v) => itemIds.has(v.itemId)).map((v) => v.id));
   const comboIds = new Set(menu.combos.filter((c) => c.parts.some((p) => variantIds.has(p.variantId))).map((c) => c.id));
   const ok = live(orders);

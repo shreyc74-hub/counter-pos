@@ -173,6 +173,14 @@ export class SupabaseAdminStore implements AdminStore {
     });
   }
 
+  itemPhotos(outletId: string): Promise<Record<string, string>> {
+    return this.rpc("admin_item_photos", { p_outlet: outletId });
+  }
+
+  async setItemPhoto(outletId: string, itemId: string, data: string | null): Promise<void> {
+    await this.rpc("admin_set_item_photo", { p_outlet: outletId, p_item: itemId, p_data: data });
+  }
+
   async setFavourites(outletId: string, ids: string[]): Promise<void> {
     await this.rpc("admin_set_favourites", { p_outlet: outletId, p_ids: ids });
   }
