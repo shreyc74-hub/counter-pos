@@ -81,8 +81,12 @@ export function PrinterScreen({ outlet }: { outlet: Outlet }) {
               ) : null}
               <div className="row between" style={{ flexWrap: "wrap" }}>
                 <span>
-                  <span className="dot" style={{ background: svc.isConnected() ? "var(--ok)" : "#a8a194", marginRight: 8 }} />
-                  {svc.isConnected() ? `Connected: ${svc.deviceName() ?? "printer"}` : "Not connected"}
+                  <span className="dot" style={{ background: svc.isConnected() || (s.sharePrinter && svc.hasPrinter()) ? "var(--ok)" : "#a8a194", marginRight: 8 }} />
+                  {svc.isConnected()
+                    ? `Connected: ${svc.deviceName() ?? "printer"}`
+                    : s.sharePrinter && svc.hasPrinter()
+                      ? `Ready: ${svc.deviceName() ?? "printer"} (connects only while printing)`
+                      : "Not connected"}
                 </span>
                 <span className="row">
                   {s.bluetoothDeviceId ? (
@@ -95,6 +99,15 @@ export function PrinterScreen({ outlet }: { outlet: Outlet }) {
                   </button>
                 </span>
               </div>
+              <label className="row" style={{ gap: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={s.sharePrinter}
+                  onChange={(e) => svc.updateSettings({ sharePrinter: e.target.checked })}
+                  style={{ width: 22, height: 22 }}
+                />
+                Share the printer with Zomato / Swiggy apps (connect only while printing)
+              </label>
               <label className="field">
                 Send speed
                 <select

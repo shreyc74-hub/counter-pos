@@ -64,6 +64,12 @@ the notes there explain each one and how to preview a tablet size on a computer.
 
 ## Printing to the thermal printer
 
+**Sharing the printer with Zomato / Swiggy:** a Bluetooth printer talks to one app at a
+time. With *Share the printer with Zomato / Swiggy apps* on (Printer screen, on by default),
+the counter connects only while printing and lets go right after, so those apps can print
+in between. If another app is holding the printer, the counter keeps trying for ~10 seconds,
+then shows "Couldn't reach the printer…" with Retry; the bill itself is always saved.
+
 **Item name size** (Printer screen): *Medium* (default) prints dish names 1¼× size, between
 the normal text and the big shop name, each on its own line with "qty x price / amount"
 under it. Printers have no 1¼× font, so medium names print as a small picture of the text

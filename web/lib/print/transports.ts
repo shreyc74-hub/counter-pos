@@ -25,6 +25,8 @@ export interface PrinterTransport {
   connect(interactive: boolean): Promise<void>;
   print(payload: PrintPayload): Promise<void>;
   disconnect(): Promise<void>;
+  /** Bluetooth: let go of the printer for now, keeping it remembered. */
+  release?(): void;
 }
 
 // GATT services used by common Bluetooth Low Energy receipt printers. Web Bluetooth only
@@ -42,9 +44,34 @@ const BLE_PRINTER_SERVICES = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Rejects if `p` takes longer than `ms` (a printer held by another app may never answer). */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+export const PRINTER_BUSY =
+  "Couldn't reach the printer. If the Zomato / Swiggy app is printing or still connected to it, wait a few seconds and tap Retry. Otherwise check it is on.";
+
 /**
  * Prints straight from Chrome over Bluetooth Low Energy (Web Bluetooth).
  * Works only if the printer supports BLE. Classic-only printers need RawBT.
+ *
+ * A Bluetooth printer talks to one app at a time. With `share` on (the default) the
+ * connection is opened only to print and closed right after, so other apps on the same
+ * printer (Zomato / Swiggy order apps) can print in between. A connection that has gone
+ * stale (printer slept, screen locked, another app took it) is dropped and reopened.
  */
 export class WebBluetoothTransport implements PrinterTransport {
   readonly kind = "bluetooth" as const;
@@ -52,7 +79,13 @@ export class WebBluetoothTransport implements PrinterTransport {
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
 
   constructor(
-    private readonly opts: { chunkSize: number; rememberedDeviceId: string | null; onDeviceId: (id: string) => void },
+    private readonly opts: {
+      chunkSize: number;
+      rememberedDeviceId: string | null;
+      onDeviceId: (id: string) => void;
+      /** Release the printer after each print so other apps can use it (read each time, so it can change). */
+      share: () => boolean;
+    },
   ) {}
 
   static isSupported(): boolean {
@@ -83,8 +116,13 @@ export class WebBluetoothTransport implements PrinterTransport {
     const device = this.device;
     if (!device.gatt) throw new Error("This device has no Bluetooth LE connection.");
     device.addEventListener("gattserverdisconnected", () => (this.characteristic = null), { once: true });
-    const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
-    this.characteristic = await findWritable(server);
+    try {
+      const server = device.gatt.connected ? device.gatt : await withTimeout(device.gatt.connect(), 10_000, PRINTER_BUSY);
+      this.characteristic = await withTimeout(findWritable(server), 10_000, PRINTER_BUSY);
+    } catch (e) {
+      this.reset();
+      throw e;
+    }
   }
 
   async print(payload: PrintPayload): Promise<void> {
@@ -93,15 +131,43 @@ export class WebBluetoothTransport implements PrinterTransport {
     if (!ch) throw new Error("Printer not connected.");
     const noResponse = ch.properties.writeWithoutResponse;
     const size = Math.max(20, this.opts.chunkSize);
-    for (let i = 0; i < payload.bytes.length; i += size) {
-      const chunk = payload.bytes.slice(i, i + size);
-      if (noResponse) {
-        await ch.writeValueWithoutResponse(chunk);
-        await sleep(8); // give cheap printers time to drain their buffer
-      } else {
-        await ch.writeValueWithResponse(chunk);
+    try {
+      for (let i = 0; i < payload.bytes.length; i += size) {
+        const chunk = payload.bytes.slice(i, i + size);
+        if (noResponse) {
+          await ch.writeValueWithoutResponse(chunk);
+          // Give cheap printers time to drain their buffer; a longer pause every ~1 KB
+          // keeps picture lines (item names) from overflowing it.
+          await sleep((i + size) % 1024 < size ? 60 : 8);
+        } else {
+          await ch.writeValueWithResponse(chunk);
+        }
       }
+    } catch (e) {
+      // A failed write usually means the link went stale: start fresh next time.
+      this.reset();
+      throw e;
     }
+    if (this.opts.share()) {
+      // Let the last bytes leave the phone before letting go of the printer.
+      await sleep(Math.min(3000, 600 + payload.bytes.length / 4));
+      this.release();
+    }
+  }
+
+  /** Closes the connection but remembers the printer (the next print reconnects). */
+  release(): void {
+    this.characteristic = null;
+    try {
+      if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+    } catch {
+      // already gone
+    }
+  }
+
+  /** Drops a connection that is no longer usable. */
+  private reset(): void {
+    this.release();
   }
 
   async disconnect(): Promise<void> {

@@ -5,6 +5,7 @@ import { type ItemSize, type ReceiptLine, renderText } from "./receipt";
 import {
   BrowserPrintTransport,
   type PrintPayload,
+  PRINTER_BUSY,
   type PrinterTransport,
   RawBtTransport,
   WebBluetoothTransport,
@@ -23,6 +24,11 @@ export interface PrinterSettings {
   bluetoothDeviceId: string | null;
   /** Size of item names on the bill (see receipt.ts ItemSize). */
   itemSize: ItemSize;
+  /**
+   * Bluetooth: connect only while printing, then let go, so other apps (Zomato / Swiggy)
+   * can use the same printer. Off: stay connected (slightly faster, but blocks other apps).
+   */
+  sharePrinter: boolean;
 }
 
 export interface PrintJob {
@@ -44,6 +50,7 @@ const DEFAULTS: PrinterSettings = {
   chunkSize: 20,
   bluetoothDeviceId: null,
   itemSize: "medium",
+  sharePrinter: true,
 };
 
 type Listener = () => void;
@@ -104,7 +111,14 @@ export class PrinterService {
     const t = this.getTransport();
     if (!t) throw new Error("Choose how to print first.");
     await t.connect(true);
+    // Sharing: the printer is now chosen and checked; let go of it until there's something to print.
+    if (this.settings.sharePrinter) t.release?.();
     this.emit();
+  }
+
+  /** A printer has been chosen (it may be connected only while printing). */
+  hasPrinter(): boolean {
+    return this.settings.mode === "bluetooth" ? !!this.settings.bluetoothDeviceId || !!this.transport?.deviceName() : this.settings.mode !== "none";
   }
 
   async forgetPrinter(): Promise<void> {
@@ -191,7 +205,9 @@ export class PrinterService {
       return;
     }
     const payload = this.buildPayload(job.lines);
-    const delays = transport.kind === "bluetooth" ? [0, 600, 1500] : [0];
+    // Bluetooth: a sleeping printer, or one another app has just let go of, can take a few
+    // seconds to accept a connection, so keep trying for about 10 seconds.
+    const delays = transport.kind === "bluetooth" ? [0, 1000, 2500, 5000] : [0];
     let lastError = "";
     for (const delay of delays) {
       if (delay) await new Promise((r) => setTimeout(r, delay));
@@ -215,6 +231,7 @@ export class PrinterService {
         chunkSize: s.chunkSize,
         rememberedDeviceId: s.bluetoothDeviceId,
         onDeviceId: (id) => this.updateSettings({ bluetoothDeviceId: id }),
+        share: () => this.settings.sharePrinter,
       });
     } else if (s.mode === "rawbt") this.transport = new RawBtTransport();
     else if (s.mode === "browser") this.transport = new BrowserPrintTransport();
@@ -230,7 +247,7 @@ export class PrinterService {
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (/User cancelled|chooser/i.test(msg)) return "No printer chosen.";
-  if (/GATT|disconnected|NetworkError/i.test(msg)) return "Printer is off or out of range. Turn it on and tap Retry.";
+  if (/GATT|disconnected|NetworkError|Couldn't reach the printer/i.test(msg)) return PRINTER_BUSY;
   return msg;
 }
 
