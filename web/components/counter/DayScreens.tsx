@@ -108,7 +108,7 @@ export function CloseDayScreen({
         {totals.unpaidCount ? (
           <div className="error">
             {totals.unpaidCount} dine-in bill{totals.unpaidCount === 1 ? " is" : "s are"} not paid yet ({formatRupees(totals.unpaidPaise)}). Take the
-            payment in Orders today (or void the bill) before closing the day.
+            payment in ☰ → Unpaid orders (or void the bill) before closing the day.
           </div>
         ) : null}
         <div className="two-col">

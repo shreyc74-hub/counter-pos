@@ -28,7 +28,7 @@ export interface OrderDraft {
   service: Service | null;
   externalOrderId: string | null;
   note: string | null;
-  /** Dine in only: save the bill now, take payment after the meal (from Orders today). */
+  /** Dine in only: save the bill now, take payment after the meal (from Unpaid orders). */
   payLater: boolean;
 }
 

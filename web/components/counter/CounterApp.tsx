@@ -20,7 +20,7 @@ import { PrinterScreen } from "./PrinterScreen";
 import { ReceiptSheet } from "./ReceiptSheet";
 import { Sheet, Toast, errorText, usePrinter } from "./ui";
 
-type View = "order" | "orders" | "expense" | "day" | "printer";
+type View = "order" | "orders" | "unpaid" | "expense" | "day" | "printer";
 
 const IDLE_LOCK_MS = 5 * 60 * 1000;
 
@@ -281,6 +281,7 @@ export function CounterApp() {
   const nav: [View, string][] = [
     ["order", "New order"],
     ["orders", `Orders today (${billCount})`],
+    ["unpaid", `Unpaid orders (${totals?.unpaidCount ?? 0})`],
     ["expense", "Expense / cash"],
     ["day", "Close day"],
     ["printer", printerLabel],
@@ -310,7 +311,7 @@ export function CounterApp() {
           ) : null}
         </div>
         {totals?.unpaidCount ? (
-          <button type="button" className="btn btn-unpaid-chip" onClick={() => go("orders")}>
+          <button type="button" className="btn btn-unpaid-chip" onClick={() => go("unpaid")}>
             {totals.unpaidCount} not paid
           </button>
         ) : null}
@@ -394,8 +395,10 @@ export function CounterApp() {
           onSubmit={submit}
         />
       ) : null}
-      {view === "orders" ? (
+      {view === "orders" || view === "unpaid" ? (
         <OrdersToday
+          key={view}
+          unpaidOnly={view === "unpaid"}
           orders={orders}
           outlet={boot.outlet}
           staff={staff}
@@ -443,7 +446,7 @@ export function CounterApp() {
           }}
           onClose={async (counted, leftovers) => {
             if (totals.unpaidCount) {
-              throw new Error(`${totals.unpaidCount} dine-in bill(s) are still not paid. Take their payment in Orders today (or void them) first.`);
+              throw new Error(`${totals.unpaidCount} dine-in bill(s) are still not paid. Take their payment in ☰ → Unpaid orders (or void them) first.`);
             }
             const closed = await store.closeDay({ countedCashPaise: counted, leftovers });
             if (svc.getSettings().mode !== "none") {

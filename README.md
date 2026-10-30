@@ -52,7 +52,8 @@ Dine in or Takeaway before payment; it is printed big on the receipt.
 
 - **Not paid (dine in):** with Dine in chosen, the cart also offers **NOT PAID · pay after
   eating**. The bill is saved and printed with NOT PAID; a "1 not paid" button stays at the
-  top until it is paid from Orders today (**Paid CASH / Paid UPI**). The day can't be closed
+  top until it is paid from ☰ → **Unpaid orders** (review the bill, then **Paid CASH / Paid UPI**;
+  it keeps its bill number, no second entry). The day can't be closed
   while a bill is still not paid (pay it or void it).
 - **Refresh-safe cart:** the order being built is kept on the device, so a page refresh
   doesn't lose it (items no longer on the menu are dropped, prices refreshed).

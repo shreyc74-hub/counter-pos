@@ -47,7 +47,7 @@ export function ReceiptSheet({
               {order.billNo} ·{" "}
               {order.payments.length
                 ? order.payments.map((p) => `${p.method === "cash" ? "Cash" : "UPI"} ${formatRupees(p.amountPaise)}`).join(" + ")
-                : "NOT PAID: take payment from Orders today"}
+                : "NOT PAID: take payment from ☰ → Unpaid orders"}
             </span>
           </div>
         </div>

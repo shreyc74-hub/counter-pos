@@ -16,8 +16,11 @@ export function OrdersToday({
   onVoid,
   onReprint,
   onSettle,
+  unpaidOnly = false,
 }: {
   orders: Order[];
+  /** "Unpaid orders": only dine-in bills still waiting for payment. */
+  unpaidOnly?: boolean;
   outlet: Outlet;
   staff: Staff;
   onVoid: (orderId: string, reason: string, approverPin: string | null) => Promise<void>;
@@ -27,16 +30,18 @@ export function OrdersToday({
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Order | null>(null);
+  const shown = useMemo(() => (unpaidOnly ? orders.filter(isUnpaid) : orders), [orders, unpaidOnly]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter((o) => o.billNo.toLowerCase().includes(q) || String(o.token) === q);
-  }, [orders, query]);
+    if (!q) return shown;
+    return shown.filter((o) => o.billNo.toLowerCase().includes(q) || String(o.token) === q);
+  }, [shown, query]);
+  const waiting = shown.reduce((s, o) => s + o.totalPaise, 0);
   return (
     <div className="page">
       <div className="page-narrow stack">
         <div className="row between" style={{ flexWrap: "wrap" }}>
-          <h1 style={{ fontSize: 26 }}>Orders today</h1>
+          <h1 style={{ fontSize: 26 }}>{unpaidOnly ? "Unpaid orders" : "Orders today"}</h1>
           <input
             className="input"
             style={{ maxWidth: 280, minHeight: 44 }}
@@ -47,7 +52,13 @@ export function OrdersToday({
           />
         </div>
         <div className="card" style={{ padding: "4px 20px" }}>
-          {filtered.length === 0 ? <p className="muted">No orders yet.</p> : null}
+          {unpaidOnly && shown.length ? (
+            <p className="small muted">
+              {shown.length} bill{shown.length === 1 ? "" : "s"} waiting for payment: {formatRupees(waiting)}. Tap one to review it and mark it paid; it keeps
+              its bill number.
+            </p>
+          ) : null}
+          {filtered.length === 0 ? <p className="muted">{unpaidOnly ? "Nothing waiting for payment." : "No orders yet."}</p> : null}
           {filtered.map((o) => (
             <button
               key={o.id}
@@ -83,7 +94,10 @@ export function OrdersToday({
           onClose={() => setOpen(null)}
           onVoid={onVoid}
           onReprint={onReprint}
-          onSettle={onSettle}
+          onSettle={async (o, m) => {
+            await onSettle(o, m);
+            setOpen(null); // paid: back to the list (the toast confirms it)
+          }}
         />
       ) : null}
     </div>
