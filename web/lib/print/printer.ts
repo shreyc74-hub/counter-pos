@@ -34,7 +34,10 @@ export interface PrinterSettings {
 export interface PrintJob {
   id: string;
   label: string;
-  status: "queued" | "printing" | "done" | "failed";
+  /** waiting: the printer was busy (e.g. another app was printing); it is tried again by itself. */
+  status: "queued" | "printing" | "waiting" | "done" | "failed";
+  /** How many times it has gone back to waiting. */
+  waits?: number;
   attempts: number;
   error: string | null;
   createdAt: number;
@@ -42,6 +45,8 @@ export interface PrintJob {
 }
 
 const SETTINGS_KEY = "cpos.printer.v1";
+const AUTO_RETRY_EVERY_MS = 15_000;
+const AUTO_RETRY_ROUNDS = 12; // about 3 minutes
 const DEFAULTS: PrinterSettings = {
   mode: "none",
   width: 32,
@@ -138,7 +143,7 @@ export class PrinterService {
   }
 
   retry(jobId: string): void {
-    this.jobs = this.jobs.map((j) => (j.id === jobId ? { ...j, status: "queued", error: null } : j));
+    this.jobs = this.jobs.map((j) => (j.id === jobId ? { ...j, status: "queued", error: null, waits: 0 } : j));
     this.emit();
     void this.drain();
   }
@@ -219,6 +224,19 @@ export class PrinterService {
       } catch (e) {
         lastError = friendlyError(e);
       }
+    }
+    // Bluetooth printer busy or asleep (another app may have it): keep the bill and try
+    // again by itself every 15 s for a few minutes, instead of waiting for a tap. A printer
+    // that has to be chosen again (needs a tap) is reported straight away.
+    const waits = this.job(jobId)?.waits ?? 0;
+    if (transport.kind === "bluetooth" && waits < AUTO_RETRY_ROUNDS && !/Tap Connect printer/i.test(lastError)) {
+      patch({ status: "waiting", error: lastError, waits: waits + 1 });
+      setTimeout(() => {
+        if (this.job(jobId)?.status !== "waiting") return; // printed or dismissed meanwhile
+        patch({ status: "queued" });
+        void this.drain();
+      }, AUTO_RETRY_EVERY_MS);
+      return;
     }
     patch({ status: "failed", error: lastError });
   }

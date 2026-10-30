@@ -277,7 +277,11 @@ export function CounterApp() {
   };
 
   const billCount = orders.filter((o) => !o.voided).length;
-  const printerLabel = svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed") ? "Printer: failed" : "Printer";
+  const printerLabel = svc.getSettings().mode === "none" ? "Printer: off" : svc.getJobs().some((j) => j.status === "failed")
+        ? "Printer: failed"
+        : svc.getJobs().some((j) => j.status === "waiting")
+          ? "Printer: waiting"
+          : "Printer";
   const nav: [View, string][] = [
     ["order", "New order"],
     ["orders", `Orders today (${billCount})`],

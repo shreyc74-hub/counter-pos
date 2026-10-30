@@ -83,6 +83,19 @@ export function PrintStatus({ jobId, onOpenPrinter }: { jobId: string | null; on
     );
   }
   if (!job) return null;
+  if (job.status === "waiting") {
+    return (
+      <div className="notice row between small" role="status">
+        <span>
+          Waiting for the printer (the Zomato / Swiggy app may be using it). It will print by itself as soon as the printer is free. The bill is
+          saved.
+        </span>
+        <button type="button" className="btn" onClick={() => svc.retry(job.id)}>
+          Try now
+        </button>
+      </div>
+    );
+  }
   if (job.status === "failed") {
     return (
       <div className="error row between small" role="alert">
