@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "@/lib/data";
 import { loadPhotos } from "@/lib/data/photos";
+import { clearSavedCart } from "@/lib/domain/savedCart";
 import { type Bootstrap, type DeviceChoice, type PosStore, StoreError } from "@/lib/data/store";
 import { businessDate, computeDayTotals } from "@/lib/domain/billing";
-import { subtotalPaise, totalPaise } from "@/lib/domain/cart";
+import { buildPayments, subtotalPaise, totalPaise } from "@/lib/domain/cart";
 import { formatRupees } from "@/lib/domain/money";
 import type { CashMovement, DaySession, Expense, Order, Payment, Staff } from "@/lib/domain/types";
 import { layoutDayReport, layoutReceipt } from "@/lib/print/receipt";
@@ -212,7 +213,7 @@ export function CounterApp() {
   const printOrder = (order: Order, duplicate = false) =>
     svc.enqueue(
       `${duplicate ? "Reprint" : "Bill"} ${order.billNo}`,
-      layoutReceipt(order, boot.outlet, { width: svc.getSettings().width, duplicate }),
+      layoutReceipt(order, boot.outlet, { width: svc.getSettings().width, itemSize: svc.getSettings().itemSize, duplicate }),
     );
 
   const saveOrder = async (order: Order, isRetry = false): Promise<boolean> => {
@@ -223,7 +224,11 @@ export function CounterApp() {
       return false;
     }
     setFailedSave(null);
-    if (isRetry) setCartKey((k) => k + 1);
+    if (isRetry) {
+      // The cart was not emptied by the order screen (its save failed first): empty it now.
+      clearSavedCart();
+      setCartKey((k) => k + 1);
+    }
     setOrders((os) => [order, ...os.filter((o) => o.id !== order.id)]);
     const jobId = svc.getSettings().autoPrint ? printOrder(order) : null;
     setReceipt({ order, jobId });
@@ -250,6 +255,7 @@ export function CounterApp() {
       discount: draft.discount,
       totalPaise: totalPaise(draft.lines, draft.discount?.amountPaise ?? 0),
       payments,
+      unpaid: draft.payLater,
       createdAt: new Date().toISOString(),
       menuVersion: boot.menu.version,
       voided: null,
@@ -290,6 +296,11 @@ export function CounterApp() {
             </button>
           ) : null}
         </div>
+        {totals?.unpaidCount ? (
+          <button type="button" className="btn btn-unpaid-chip" onClick={() => go("orders")}>
+            {totals.unpaidCount} not paid
+          </button>
+        ) : null}
         {view !== "order" ? (
           <button type="button" className="btn" onClick={() => go("order")}>
             ← New order
@@ -320,6 +331,12 @@ export function CounterApp() {
                 <strong>{formatRupees(totals.upiSalesPaise)}</strong>
                 <span>Cash in drawer</span>
                 <strong>{formatRupees(totals.expectedCashPaise)}</strong>
+                {totals.unpaidCount ? (
+                  <>
+                    <span>Not paid ({totals.unpaidCount})</span>
+                    <strong>{formatRupees(totals.unpaidPaise)}</strong>
+                  </>
+                ) : null}
               </div>
             ) : null}
             {nav.map(([v, label]) => (
@@ -373,6 +390,12 @@ export function CounterApp() {
             printOrder(o, true);
             setToast(`Reprinting ${o.billNo}`);
           }}
+          onSettle={async (o, method) => {
+            const paid = await store.settleOrder(o.id, buildPayments(o.totalPaise, method));
+            setOrders((os) => os.map((x) => (x.id === paid.id ? paid : x)));
+            setToast(`${o.billNo} paid by ${method === "cash" ? "cash" : "UPI"}`);
+            if (svc.getSettings().autoPrint) printOrder(paid);
+          }}
           onVoid={async (id, reason, pin) => {
             await store.voidOrder(id, reason, pin);
             setOrders(await store.listOrders(day.id));
@@ -406,6 +429,9 @@ export function CounterApp() {
             svc.enqueue("Day report", layoutDayReport(day, totals, boot.outlet, { width: svc.getSettings().width }));
           }}
           onClose={async (counted, leftovers) => {
+            if (totals.unpaidCount) {
+              throw new Error(`${totals.unpaidCount} dine-in bill(s) are still not paid. Take their payment in Orders today (or void them) first.`);
+            }
             const closed = await store.closeDay({ countedCashPaise: counted, leftovers });
             if (svc.getSettings().mode !== "none") {
               svc.enqueue("Day report", layoutDayReport(closed, totals, boot.outlet, { width: svc.getSettings().width }));

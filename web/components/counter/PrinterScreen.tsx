@@ -133,6 +133,23 @@ export function PrinterScreen({ outlet }: { outlet: Outlet }) {
                   80 mm (48 characters)
                 </button>
               </div>
+              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                <span className="field" style={{ marginRight: 8 }}>
+                  Item name size
+                </span>
+                {(
+                  [
+                    ["normal", "Normal"],
+                    ["medium", "Medium (1¼×)"],
+                    ["large", "Large (tall)"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button key={v} type="button" className="chip" aria-pressed={s.itemSize === v} onClick={() => svc.updateSettings({ itemSize: v })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="small muted">The test page prints all three sizes so you can compare.</span>
               <label className="row" style={{ gap: 10 }}>
                 <input type="checkbox" checked={s.autoPrint} onChange={(e) => svc.updateSettings({ autoPrint: e.target.checked })} style={{ width: 22, height: 22 }} />
                 Print automatically when a bill is saved

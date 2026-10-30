@@ -8,6 +8,8 @@ const LF = 0x0a;
 export interface EncodeOptions {
   /** Partial cut at the end. Most 58 mm portable printers have no cutter. */
   cut?: boolean;
+  /** Draws 1¼× ("medium") lines as raster images (raster.ts). Without it they print bold double height. */
+  raster?: (text: string, widthChars: number, align: "left" | "center" | "right") => Uint8Array | null;
 }
 
 export function encodeReceipt(lines: ReceiptLine[], opts: EncodeOptions = {}, width = 32): Uint8Array {
@@ -34,9 +36,18 @@ export function encodeReceipt(lines: ReceiptLine[], opts: EncodeOptions = {}, wi
       push(ESC, 0x64, Math.max(0, Math.min(255, l.lines))); // print and feed n lines
       continue;
     }
+    if (l.medium) {
+      const img = opts.raster?.(l.text, width, l.align ?? "left");
+      if (img) {
+        push(ESC, 0x61, 0x00);
+        for (const b of img) out.push(b);
+        continue;
+      }
+    }
     push(ESC, 0x61, l.align === "center" ? 0x01 : l.align === "right" ? 0x02 : 0x00);
-    push(ESC, 0x45, l.bold ? 0x01 : 0x00);
-    push(GS, 0x21, l.big ? 0x11 : l.tall ? 0x01 : 0x00); // big: double width + height; tall: double height only
+    push(ESC, 0x45, l.bold || l.medium ? 0x01 : 0x00);
+    // big: double width + height; tall (and medium without a picture): double height only
+    push(GS, 0x21, l.big ? 0x11 : l.tall || l.medium ? 0x01 : 0x00);
     if (l.boldChars && !l.bold) {
       push(ESC, 0x45, 0x01);
       text(l.text.slice(0, l.boldChars));
@@ -46,8 +57,8 @@ export function encodeReceipt(lines: ReceiptLine[], opts: EncodeOptions = {}, wi
       text(l.text);
     }
     push(LF);
-    if (l.big || l.tall) push(GS, 0x21, 0x00);
-    if (l.bold) push(ESC, 0x45, 0x00);
+    if (l.big || l.tall || l.medium) push(GS, 0x21, 0x00);
+    if (l.bold || l.medium) push(ESC, 0x45, 0x00);
   }
   push(ESC, 0x61, 0x00);
   if (opts.cut) push(GS, 0x56, 0x42, 0x00); // feed and partial cut

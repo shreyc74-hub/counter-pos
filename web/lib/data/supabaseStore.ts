@@ -1,5 +1,5 @@
 import { formatBillNo } from "@/lib/domain/billing";
-import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/lib/domain/types";
+import type { CashMovement, DaySession, Expense, Order, Paise, Payment, Staff } from "@/lib/domain/types";
 import {
   type Bootstrap,
   type CloseDayInput,
@@ -159,7 +159,11 @@ export class SupabaseStore implements PosStore {
   }
 
   async submitOrder(order: Order): Promise<void> {
-    await this.rpc("pos_submit_order", { p_session: this.requireSession(), p_order: order });
+    await this.rpc("pos_submit_order", { p_session: this.requireSession(), p_order: { ...order, payLater: !!order.unpaid } });
+  }
+
+  async settleOrder(orderId: string, payments: Payment[]): Promise<Order> {
+    return this.rpc<Order>("pos_settle_order", { p_session: this.requireSession(), p_order: orderId, p_payments: payments });
   }
 
   async listOrders(daySessionId: string): Promise<Order[]> {

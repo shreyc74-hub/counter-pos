@@ -11,6 +11,11 @@ export function businessDate(d: Date = new Date(), timeZone = "Asia/Kolkata"): s
   return parts; // en-CA formats as YYYY-MM-DD
 }
 
+/** A bill with nothing paid yet (a dine-in bill saved as "Not paid"). */
+export function isUnpaid(o: Order): boolean {
+  return !o.voided && o.payments.length === 0;
+}
+
 export function computeDayTotals(
   day: DaySession,
   orders: Order[],
@@ -42,6 +47,8 @@ export function computeDayTotals(
     expenseUpiPaise: expenseUpi,
     cashInPaise: cashIn,
     cashOutPaise: cashOut,
+    unpaidCount: live.filter(isUnpaid).length,
+    unpaidPaise: sum(live.filter(isUnpaid).map((o) => o.totalPaise)),
     expectedCashPaise: day.openingFloatPaise + cashSales + cashIn - expenseCash - cashOut,
   };
 }

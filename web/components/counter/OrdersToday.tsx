@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { formatRupees } from "@/lib/domain/money";
-import type { Order, Outlet, Staff } from "@/lib/domain/types";
+import { isUnpaid } from "@/lib/domain/billing";
+import type { Order, Outlet, PaymentMethod, Staff } from "@/lib/domain/types";
 import { layoutReceipt } from "@/lib/print/receipt";
 import { PinPad, ReceiptPreview, Sheet, errorText, usePrinter } from "./ui";
 
@@ -14,12 +15,15 @@ export function OrdersToday({
   staff,
   onVoid,
   onReprint,
+  onSettle,
 }: {
   orders: Order[];
   outlet: Outlet;
   staff: Staff;
   onVoid: (orderId: string, reason: string, approverPin: string | null) => Promise<void>;
   onReprint: (order: Order) => void;
+  /** Takes payment for a "Not paid" dine-in bill. */
+  onSettle: (order: Order, method: PaymentMethod) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Order | null>(null);
@@ -55,10 +59,11 @@ export function OrdersToday({
               <span className="stack" style={{ gap: 2 }}>
                 <strong>
                   Token {o.token} · {o.billNo} {o.voided ? <span className="void-tag">VOID</span> : null}
+                  {isUnpaid(o) ? <span className="void-tag unpaid-tag">NOT PAID</span> : null}
                 </strong>
                 <span className="small muted">
                   {new Date(o.createdAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" })} ·{" "}
-                  {o.payments.map((p) => (p.method === "cash" ? "Cash" : "UPI")).join(" + ")} · {o.staffName}
+                  {o.payments.length ? o.payments.map((p) => (p.method === "cash" ? "Cash" : "UPI")).join(" + ") : "Not paid"} · {o.staffName}
                   {o.channel !== "counter" ? ` · ${o.channel}` : ""}
                   {o.service ? ` · ${o.service === "dine_in" ? "Dine in" : "Takeaway"}` : ""}
                 </span>
@@ -78,6 +83,7 @@ export function OrdersToday({
           onClose={() => setOpen(null)}
           onVoid={onVoid}
           onReprint={onReprint}
+          onSettle={onSettle}
         />
       ) : null}
     </div>
@@ -91,11 +97,13 @@ function OrderDetail({
   onClose,
   onVoid,
   onReprint,
+  onSettle,
 }: {
   order: Order;
   outlet: Outlet;
   staff: Staff;
   onClose: () => void;
+  onSettle: (order: Order, method: PaymentMethod) => Promise<void>;
   onVoid: (orderId: string, reason: string, approverPin: string | null) => Promise<void>;
   onReprint: (order: Order) => void;
 }) {
@@ -104,7 +112,19 @@ function OrderDetail({
   const [reason, setReason] = useState("");
   const [needPin, setNeedPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settling, setSettling] = useState(false);
   const width = svc.getSettings().width;
+  const settle = async (method: PaymentMethod) => {
+    setError(null);
+    setSettling(true);
+    try {
+      await onSettle(order, method);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSettling(false);
+    }
+  };
 
   const doVoid = async (pin: string | null) => {
     setError(null);
@@ -136,8 +156,24 @@ function OrderDetail({
           {order.voided.approvedBy ? ` (approved by ${order.voided.approvedBy})` : ""}: {order.voided.reason}
         </div>
       ) : null}
+      {isUnpaid(order) && !voiding ? (
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="notice">
+            <strong>Not paid yet: {formatRupees(order.totalPaise)}.</strong> Take the payment when the customer pays.
+          </div>
+          {error ? <div className="error small">{error}</div> : null}
+          <div className="pay">
+            <button type="button" className="btn btn-cash" disabled={settling} onClick={() => void settle("cash")}>
+              Paid CASH
+            </button>
+            <button type="button" className="btn btn-upi" disabled={settling} onClick={() => void settle("upi")}>
+              Paid UPI
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div style={{ maxHeight: "40dvh", overflow: "auto" }}>
-        <ReceiptPreview lines={layoutReceipt(order, outlet, { width })} width={width} />
+        <ReceiptPreview lines={layoutReceipt(order, outlet, { width, itemSize: svc.getSettings().itemSize })} width={width} />
       </div>
       {voiding ? (
         <div className="stack">

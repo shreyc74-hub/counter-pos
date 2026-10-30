@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addToCart,
   buildPayments,
@@ -15,6 +15,7 @@ import {
   totalPaise,
 } from "@/lib/domain/cart";
 import { formatRupees, rupeesToPaise } from "@/lib/domain/money";
+import { loadCart, saveCart } from "@/lib/domain/savedCart";
 import type { Channel, Discount, Menu, Modifier, OrderLine, Outlet, Payment, Service, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
 import type { OwnerApproval } from "@/lib/data/store";
@@ -27,6 +28,8 @@ export interface OrderDraft {
   service: Service | null;
   externalOrderId: string | null;
   note: string | null;
+  /** Dine in only: save the bill now, take payment after the meal (from Orders today). */
+  payLater: boolean;
 }
 
 interface Props {
@@ -50,14 +53,17 @@ const DISCOUNT_REASONS = ["Staff meal", "Regular customer", "Complaint", "Other"
 
 export function OrderScreen(props: Props) {
   const { menu, soldOut } = props;
-  const [lines, setLines] = useState<OrderLine[]>([]);
-  const [discount, setDiscount] = useState<Discount | null>(null);
-  const [channel, setChannel] = useState<Channel>("counter");
-  const [service, setService] = useState<Service | null>(null);
+  // A refresh mid-order keeps the cart (restored from this device, checked against the menu).
+  const [restored] = useState(() => loadCart(menu));
+  const [lines, setLines] = useState<OrderLine[]>(restored?.lines ?? []);
+  const [discount, setDiscount] = useState<Discount | null>(restored?.discount ?? null);
+  const [channel, setChannel] = useState<Channel>(restored?.channel ?? "counter");
+  const [service, setService] = useState<Service | null>(restored?.service ?? null);
   // Phones and portrait tablets: the cart opens as a panel from the order bar (see pos-layout.css).
   const [cartOpen, setCartOpen] = useState(false);
-  const [externalId, setExternalId] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  const [externalId, setExternalId] = useState(restored?.externalId ?? "");
+  const [note, setNote] = useState<string | null>(restored?.note ?? null);
+  useEffect(() => saveCart({ lines, discount, channel, service, externalId, note }), [lines, discount, channel, service, externalId, note]);
   const [markMode, setMarkMode] = useState(false);
   const [lineSheet, setLineSheet] = useState<OrderLine | null>(null);
   const [showDiscount, setShowDiscount] = useState(false);
@@ -100,6 +106,7 @@ export function OrderScreen(props: Props) {
   // Counter orders must say dine in or takeaway before payment (delivery orders don't).
   const needService = channel === "counter" && !service;
 
+  /** No payments = "Not paid" (dine in only). */
   const submit = async (payments: Payment[]) => {
     if (!lines.length || saving) return;
     setSaving(true);
@@ -112,6 +119,7 @@ export function OrderScreen(props: Props) {
           service: channel === "counter" ? service : null,
           externalOrderId: channel === "swiggy" || channel === "zomato" ? externalId.trim() || null : null,
           note,
+          payLater: payments.length === 0,
         },
         payments,
       );
@@ -287,6 +295,11 @@ export function OrderScreen(props: Props) {
               UPI
             </button>
           </div>
+          {channel === "counter" && service === "dine_in" ? (
+            <button type="button" className="btn btn-big btn-unpaid" disabled={!lines.length || saving} onClick={() => void submit([])}>
+              NOT PAID · pay after eating
+            </button>
+          ) : null}
         </div>
       </aside>
 

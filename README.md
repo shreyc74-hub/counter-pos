@@ -50,11 +50,26 @@ the total, **Dine in / Takeaway** and **Confirm order**, which slides up the car
 Orders today, Expense / cash, Close day, Printer and today's totals. Counter orders need
 Dine in or Takeaway before payment; it is printed big on the receipt.
 
+- **Not paid (dine in):** with Dine in chosen, the cart also offers **NOT PAID · pay after
+  eating**. The bill is saved and printed with NOT PAID; a "1 not paid" button stays at the
+  top until it is paid from Orders today (**Paid CASH / Paid UPI**). The day can't be closed
+  while a bill is still not paid (pay it or void it).
+- **Refresh-safe cart:** the order being built is kept on the device, so a page refresh
+  doesn't lose it (items no longer on the menu are dropped, prices refreshed).
+
 **To change the layout** (sidebar width, tiles per row, tile height, font sizes,
 colours), edit the numbers at the top of [`web/app/pos-layout.css`](web/app/pos-layout.css);
 the notes there explain each one and how to preview a tablet size on a computer.
 
 ## Printing to the thermal printer
+
+**Item name size** (Printer screen): *Medium* (default) prints dish names 1¼× size, between
+the normal text and the big shop name, each on its own line with "qty x price / amount"
+under it. Printers have no 1¼× font, so medium names print as a small picture of the text
+(standard ESC/POS raster); every dish name fits on one line of 58 mm paper. *Normal* and
+*Large* (double height, the earlier look) use the printer's own font. The **test page**
+prints all three: if medium comes out as garbage on a printer, choose Normal or Large.
+
 
 Open **Printer** in the bottom bar and pick one:
 

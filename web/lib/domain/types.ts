@@ -143,6 +143,8 @@ export interface Order {
   discount: Discount | null;
   totalPaise: Paise;
   payments: Payment[];
+  /** Dine-in bill saved before the customer paid ("Not paid"); payments are added when settled. */
+  unpaid?: boolean;
   createdAt: string; // ISO
   menuVersion: number;
   voided: { reason: string; by: string; approvedBy: string | null; at: string } | null;
@@ -207,6 +209,9 @@ export interface DayTotals {
   expenseUpiPaise: Paise;
   cashInPaise: Paise;
   cashOutPaise: Paise;
+  /** Dine-in bills not paid yet (not voided). */
+  unpaidCount: number;
+  unpaidPaise: Paise;
   /** Opening float + cash sales + cash in − cash expenses − cash out. */
   expectedCashPaise: Paise;
 }

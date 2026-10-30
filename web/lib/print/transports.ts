@@ -10,6 +10,8 @@ export interface PrintPayload {
   boldLines?: Record<number, number>;
   /** Double-height lines, for browser printing. */
   tallLines?: number[];
+  /** 1¼× lines, for browser printing. */
+  mediumLines?: number[];
   widthChars: number;
 }
 
@@ -181,6 +183,7 @@ export class BrowserPrintTransport implements PrinterTransport {
         const html =
           b == null ? escapeHtml(line) : b < 0 ? `<b>${escapeHtml(line)}</b>` : `<b>${escapeHtml(line.slice(0, b))}</b>${escapeHtml(line.slice(b))}`;
         if (payload.tallLines?.includes(i)) return `<div class="tall"><span>${html || "&nbsp;"}</span></div>`;
+        if (payload.mediumLines?.includes(i)) return `<div class="medium"><b>${escapeHtml(line) || "&nbsp;"}</b></div>`;
         return `<div class="${payload.bigLines.includes(i) ? "big" : ""}">${html || "&nbsp;"}</div>`;
       })
       .join("");
@@ -189,6 +192,7 @@ export class BrowserPrintTransport implements PrinterTransport {
       @page { size: ${mm}mm auto; margin: 0; }
       body { margin: 0; padding: 2mm; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; white-space: pre; }
       .big { font-weight: 700; font-size: 24px; line-height: 1.2; }
+      .medium { font-size: 15px; line-height: 1.3; }
       .tall { height: 2.9em; } .tall > span { display: inline-block; transform: scaleY(2); transform-origin: top left; }
     </style></head><body>${rows}</body></html>`);
     doc.close();

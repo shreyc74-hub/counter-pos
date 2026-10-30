@@ -1,6 +1,7 @@
 import { uuid } from "@/lib/uuid";
 import { encodeReceipt } from "./escpos";
-import { type ReceiptLine, renderText } from "./receipt";
+import { rasterLine } from "./raster";
+import { type ItemSize, type ReceiptLine, renderText } from "./receipt";
 import {
   BrowserPrintTransport,
   type PrintPayload,
@@ -20,6 +21,8 @@ export interface PrinterSettings {
   /** Bluetooth LE write size. 20 is safe for every printer; larger is faster if it works. */
   chunkSize: number;
   bluetoothDeviceId: string | null;
+  /** Size of item names on the bill (see receipt.ts ItemSize). */
+  itemSize: ItemSize;
 }
 
 export interface PrintJob {
@@ -40,6 +43,7 @@ const DEFAULTS: PrinterSettings = {
   autoPrint: true,
   chunkSize: 20,
   bluetoothDeviceId: null,
+  itemSize: "medium",
 };
 
 type Listener = () => void;
@@ -140,18 +144,21 @@ export class PrinterService {
     const bigLines: number[] = [];
     const boldLines: Record<number, number> = {};
     const tallLines: number[] = [];
+    const mediumLines: number[] = [];
     lines.forEach((l) => {
+      if (l.kind === "text" && l.medium) mediumLines.push(textLines.length);
       if (l.kind === "text" && l.big) bigLines.push(textLines.length);
       if (l.kind === "text" && l.tall) tallLines.push(textLines.length);
       if (l.kind === "text" && (l.bold || l.boldChars)) boldLines[textLines.length] = l.bold ? -1 : (l.boldChars ?? -1);
       textLines.push(renderText([l], width));
     });
     return {
-      bytes: encodeReceipt(lines, { cut: this.settings.cut }, width),
+      bytes: encodeReceipt(lines, { cut: this.settings.cut, raster: rasterLine }, width),
       text: textLines.join("\n"),
       bigLines,
       boldLines,
       tallLines,
+      mediumLines,
       widthChars: width,
     };
   }

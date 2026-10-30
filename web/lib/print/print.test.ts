@@ -3,7 +3,7 @@ import { fixtureMenu as demoMenu, fixtureOutlet as demoOutlet } from "@/lib/test
 import { addToCart, buildPayments, findSellable, subtotalPaise } from "@/lib/domain/cart";
 import type { Order } from "@/lib/domain/types";
 import { encodeReceipt } from "./escpos";
-import { layoutReceipt, renderText, toPrintable, twoCol } from "./receipt";
+import { layoutReceipt, mediumWidth, renderText, toPrintable, twoCol } from "./receipt";
 
 function sampleOrder(): Order {
   let lines = addToCart([], findSellable(demoMenu, "v-veg-stm-full")!, "a", [demoMenu.modifiers[0]]);
@@ -47,7 +47,7 @@ describe("receipt layout", () => {
       const lines = layoutReceipt(sampleOrder(), demoOutlet, { width });
       for (const l of lines) {
         if (l.kind !== "text") continue;
-        const limit = l.big ? width / 2 : width;
+        const limit = l.big ? width / 2 : l.medium ? mediumWidth(width) : width;
         expect(l.text.length, l.text).toBeLessThanOrEqual(limit);
       }
     });
@@ -84,8 +84,8 @@ describe("ESC/POS encoding", () => {
     expect(bytes.length).toBeLessThan(2000);
   });
 
-  it("prints item names bold, but not their qty and amount", () => {
-    const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32 });
+  it("large item names: bold, double height, on the qty/amount row", () => {
+    const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32, itemSize: "large" });
     const item = lines.find((l) => l.kind === "text" && l.text.startsWith("Veg Momos"));
     expect(item).toMatchObject({ boldChars: 19, tall: true });
     const bytes = Buffer.from(encodeReceipt(lines, {}, 32));
@@ -118,5 +118,45 @@ describe("dine in / takeaway on the receipt", () => {
     expect(line).toMatchObject({ big: true, bold: true, align: "center" });
     expect(text({ ...sampleOrder(), service: "dine_in" })).toContain("DINE IN");
     expect(text(sampleOrder()).some((t) => t === "TAKEAWAY" || t === "DINE IN")).toBe(false);
+  });
+});
+
+describe("medium (1.25x) item names", () => {
+  const lines = layoutReceipt(sampleOrder(), demoOutlet, { width: 32 });
+  it("is the default: name on its own bold line, then qty x price and amount", () => {
+    // 25 characters fit at 1.25x on 58 mm paper: every dish name ("Half Singapuri Fried Rice") fits on one line
+    const i = lines.findIndex((l) => l.kind === "text" && l.text === "Veg Momos Steamed Full");
+    expect(lines[i]).toMatchObject({ bold: true, medium: true });
+    expect((lines[i + 1] as { text: string }).text).toMatch(/^ {2}1 x 100\.00 +100\.00$/);
+    expect(lines.some((l) => l.kind === "text" && l.text.startsWith("Item ") && l.text.includes("Qty"))).toBe(false);
+  });
+  it("prints as a picture when the printer service can draw one", () => {
+    const fake = Uint8Array.from([0x1d, 0x76, 0x30, 0x00, 1, 0, 1, 0, 0xff]);
+    const bytes = Buffer.from(encodeReceipt(lines, { raster: () => fake }, 32));
+    expect(bytes.includes(Buffer.from(fake))).toBe(true);
+    expect(bytes.includes(Buffer.from("Veg Momos Steamed"))).toBe(false);
+  });
+  it("falls back to bold double height without a picture", () => {
+    const bytes = Buffer.from(encodeReceipt(lines, {}, 32));
+    const start = bytes.indexOf(Buffer.from("Veg Momos Steamed"));
+    expect(start).toBeGreaterThan(-1);
+    expect(bytes.lastIndexOf(Buffer.from([0x1d, 0x21, 0x01]), start)).toBeGreaterThan(-1);
+  });
+});
+
+describe("not paid", () => {
+  it("prints NOT PAID instead of the payment line", () => {
+    const o = { ...sampleOrder(), payments: [], unpaid: true, service: "dine_in" as const };
+    const text = renderText(layoutReceipt(o, demoOutlet, { width: 32 }), 32);
+    expect(text).toContain("NOT PAID");
+    expect(text).not.toContain("Paid:");
+  });
+});
+
+describe("real menu names", () => {
+  it("every dish name fits on one medium line on 58 mm paper", async () => {
+    const menu = (await import("@/lib/data/menus/street-heaven.json")).default as { items: { name: string; variants: { name: string }[] }[] };
+    const names = menu.items.flatMap((i) => i.variants.map((v) => `${v.name} ${i.name}`));
+    expect(Math.max(...names.map((n) => n.length))).toBeLessThanOrEqual(mediumWidth(32));
   });
 });

@@ -15,6 +15,11 @@ export type ReceiptLine =
       big?: boolean;
       /** Double height, normal width: easier to read, still fits the line. */
       tall?: boolean;
+      /**
+       * 1¼× size, between normal text and the big title. Printers have no such size, so
+       * it prints as a small picture of the text (see raster.ts); fits 4/5 of the characters.
+       */
+      medium?: boolean;
       /** Print only the first N characters bold (e.g. the item name, not its qty and amount). */
       boldChars?: number;
     }
@@ -25,7 +30,14 @@ export interface ReceiptOptions {
   /** Characters per line: 32 for 58 mm paper, 48 for 80 mm. */
   width: 32 | 48;
   duplicate?: boolean;
+  /** Item names on the bill: normal bold, medium (1¼×, the default) or large (double height). */
+  itemSize?: ItemSize;
 }
+
+export type ItemSize = "normal" | "medium" | "large";
+
+/** Characters that fit on a line of medium (1¼×) text: 25 on 58 mm paper (every dish name fits), 38 on 80 mm. */
+export const mediumWidth = (width: number) => Math.floor((width * 4) / 5);
 
 const CHANNEL_LABEL: Record<Order["channel"], string> = {
   counter: "Counter",
@@ -108,12 +120,20 @@ export function layoutReceipt(order: Order, outlet: Outlet, opts: ReceiptOptions
   if (order.service) t(order.service === "dine_in" ? "DINE IN" : "TAKEAWAY", { align: "center", bold: true, big: true });
   lines.push({ kind: "rule" });
 
-  t(row("Item", "Qty", "Amt", nameW, qtyW, amtW));
+  const itemSize = opts.itemSize ?? "medium";
+  if (itemSize !== "medium") t(row("Item", "Qty", "Amt", nameW, qtyW, amtW));
   for (const l of order.lines) {
-    const nameLines = wrap(l.name, nameW);
-    // Item lines are double height for readability; the name is bold, qty and amount regular.
-    t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW), { boldChars: nameW, tall: true });
-    for (const extra of nameLines.slice(1)) t(extra, { bold: true, tall: true });
+    if (itemSize === "medium") {
+      // Name in 1¼× bold on its own line, then "qty x price  amount" in normal text.
+      for (const n of wrap(l.name, mediumWidth(W))) t(n, { bold: true, medium: true });
+      t(twoCol(`  ${l.qty} x ${formatAmount(l.unitPricePaise)}`, formatAmount(l.unitPricePaise * l.qty), W));
+    } else {
+      // Name, qty and amount on one row; the name is bold (and double height when "large").
+      const tall = itemSize === "large";
+      const nameLines = wrap(l.name, nameW);
+      t(row(nameLines[0], String(l.qty), formatAmount(l.unitPricePaise * l.qty), nameW, qtyW, amtW), { boldChars: nameW, tall });
+      for (const extra of nameLines.slice(1)) t(extra, { bold: true, tall });
+    }
     for (const m of l.modifiers) {
       const label = `  + ${m.name}`;
       t(m.pricePaise ? twoCol(label, formatAmount(m.pricePaise * l.qty), W) : toPrintable(label));
@@ -130,10 +150,14 @@ export function layoutReceipt(order: Order, outlet: Outlet, opts: ReceiptOptions
   t(twoCol("TOTAL", `Rs ${formatAmount(order.totalPaise)}`, W / 2), { bold: true, big: true });
   lines.push({ kind: "rule" });
 
-  const paid = order.payments
-    .map((p) => `${p.method === "cash" ? "Cash" : "UPI"} ${formatAmount(p.amountPaise)}`)
-    .join(" + ");
-  t(`Paid: ${paid}`);
+  if (!order.payments.length) {
+    t("NOT PAID", { align: "center", bold: true, big: true });
+  } else {
+    const paid = order.payments
+      .map((p) => `${p.method === "cash" ? "Cash" : "UPI"} ${formatAmount(p.amountPaise)}`)
+      .join(" + ");
+    t(`Paid: ${paid}`);
+  }
   const change = changeDuePaise(order.payments);
   if (change > 0) {
     const cash = order.payments.find((p) => p.method === "cash");
@@ -197,6 +221,15 @@ export function layoutTestPage(outlet: Outlet, opts: Pick<ReceiptOptions, "width
     { kind: "text", text: "Bold text", bold: true },
     { kind: "text", text: "BIG", big: true },
     { kind: "rule" },
+    { kind: "text", text: "Item name sizes:" },
+    { kind: "text", text: "Half Veg Steam Momo (normal)", bold: true },
+    { kind: "text", text: "Half Veg Steam Momo", bold: true, medium: true },
+    { kind: "text", text: "  (medium)" },
+    { kind: "text", text: "Half Veg Steam Momo (large)", bold: true, tall: true },
+    ...wrap("If 'medium' prints as garbage, pick Normal or Large under Item name size.", W).map(
+      (text): ReceiptLine => ({ kind: "text", text }),
+    ),
+    { kind: "rule" },
     { kind: "text", text: `If every line fits, ${W} chars is right.` },
     { kind: "feed", lines: 3 },
   ];
@@ -211,7 +244,7 @@ export function renderText(lines: ReceiptLine[], width: number): string {
     .map((l) => {
       if (l.kind === "rule") return "-".repeat(width);
       if (l.kind === "feed") return "";
-      const w = l.big ? Math.floor(width / 2) : width;
+      const w = l.big ? Math.floor(width / 2) : l.medium ? mediumWidth(width) : width;
       const text = l.text.slice(0, w);
       const padded =
         l.align === "center"

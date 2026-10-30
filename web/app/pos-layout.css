@@ -193,3 +193,8 @@
   .total strong { font-size: 26px; }
   .pay .btn { min-height: 56px; font-size: 20px; }
 }
+
+/* ---------- "Not paid" (dine in, pay after eating) */
+.btn-unpaid { width: 100%; min-height: 56px; background: #fff7e6; border: 2px dashed #d97706; color: #92400e; font-size: 18px; }
+.btn-unpaid-chip { flex: none; min-height: 40px; background: #fff7e6; border-color: #d97706; color: #92400e; font-weight: 800; }
+.unpaid-tag { color: #b45309; }

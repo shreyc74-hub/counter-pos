@@ -7,6 +7,7 @@ import type {
   Order,
   Outlet,
   Paise,
+  Payment,
   Staff,
 } from "@/lib/domain/types";
 
@@ -60,6 +61,8 @@ export interface PosStore {
   submitOrder(order: Order): Promise<void>;
   listOrders(daySessionId: string): Promise<Order[]>;
   voidOrder(orderId: string, reason: string, approverPin: string | null): Promise<void>;
+  /** Takes payment for a dine-in bill saved as "Not paid". Safe to retry. */
+  settleOrder(orderId: string, payments: Payment[]): Promise<Order>;
 
   addExpense(e: Omit<Expense, "id" | "createdAt" | "staffId" | "staffName" | "daySessionId">): Promise<Expense>;
   listExpenses(daySessionId: string): Promise<Expense[]>;

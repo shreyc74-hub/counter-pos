@@ -1,5 +1,5 @@
 import { businessDate, computeDayTotals, formatBillNo } from "@/lib/domain/billing";
-import type { CashMovement, DaySession, Expense, Order, Paise, Staff } from "@/lib/domain/types";
+import type { CashMovement, DaySession, Expense, Order, Paise, Payment, Staff } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
 import { toCounterMenu } from "@/lib/admin/menu";
 import { demoOutlet, demoStaff } from "./demoMenu";
@@ -98,6 +98,9 @@ export class DemoStore implements PosStore {
       state.expenses.filter((e) => e.daySessionId === day.id),
       state.movements.filter((m) => m.daySessionId === day.id),
     );
+    if (totals.unpaidCount) {
+      throw new StoreError("Some dine-in bills are still not paid. Take their payment (or void them) first.", "conflict");
+    }
     day.closedAt = new Date().toISOString();
     day.closedBy = staff.name;
     day.expectedCashPaise = totals.expectedCashPaise;
@@ -133,6 +136,25 @@ export class DemoStore implements PosStore {
     return this.read()
       .orders.filter((o) => o.daySessionId === daySessionId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async settleOrder(orderId: string, payments: Payment[]): Promise<Order> {
+    this.requireStaff();
+    const state = this.read();
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) throw new StoreError("Bill not found.", "invalid");
+    if (order.payments.length) return order;
+    if (order.voided) throw new StoreError("This bill was voided.", "conflict");
+    if (!state.days.some((d) => d.id === order.daySessionId && d.closedAt === null)) {
+      throw new StoreError("This bill belongs to a day that is closed.", "conflict");
+    }
+    if (payments.reduce((s, p) => s + p.amountPaise, 0) !== order.totalPaise) {
+      throw new StoreError("Payments do not match the bill total.", "invalid");
+    }
+    order.payments = payments;
+    order.unpaid = false;
+    this.write(state);
+    return order;
   }
 
   async voidOrder(orderId: string, reason: string, approverPin: string | null): Promise<void> {

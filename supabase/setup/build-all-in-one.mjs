@@ -11,6 +11,7 @@ const parts = [
   "supabase/migrations/20261023000003_admin_api.sql",
   "supabase/migrations/20261024000004_device_login.sql",
   "supabase/migrations/20261030000005_service_and_photos.sql",
+  "supabase/migrations/20261030000006_pay_later.sql",
   "supabase/setup/street-heaven.sql",
 ];
 const header = `-- ============================================================================

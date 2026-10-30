@@ -25,7 +25,7 @@ export function ReceiptSheet({
   const svc = usePrinter();
   const settings = svc.getSettings();
   const job = svc.job(jobId);
-  const lines = layoutReceipt(order, outlet, { width: settings.width });
+  const lines = layoutReceipt(order, outlet, { width: settings.width, itemSize: settings.itemSize });
 
   // Go back to a fresh order on its own once the receipt has printed (or there is no printer).
   useEffect(() => {
@@ -44,7 +44,10 @@ export function ReceiptSheet({
               Saved · Token {order.token} · {formatRupees(order.totalPaise)}
             </h2>
             <span className="muted small">
-              {order.billNo} · {order.payments.map((p) => `${p.method === "cash" ? "Cash" : "UPI"} ${formatRupees(p.amountPaise)}`).join(" + ")}
+              {order.billNo} ·{" "}
+              {order.payments.length
+                ? order.payments.map((p) => `${p.method === "cash" ? "Cash" : "UPI"} ${formatRupees(p.amountPaise)}`).join(" + ")
+                : "NOT PAID: take payment from Orders today"}
             </span>
           </div>
         </div>
