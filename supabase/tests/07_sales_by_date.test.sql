@@ -5,7 +5,8 @@ set role anon;
 do $$
 declare
   ses uuid; outlet uuid; b jsonb; d jsonb; v jsonb; seq int; o jsonb; f jsonb; price int;
-  later date := current_date + 2;
+  today date := (now() at time zone 'Asia/Kolkata')::date; -- the app's dates are India dates
+  later date := today + 2;
 begin
   ses := (public.pos_device_login('test-key-two')->>'session')::uuid;
   b := public.pos_bootstrap('test-key-two');
@@ -28,13 +29,13 @@ begin
                   'a sale shows on the date it happened, not the date the day was opened');
   -- (that the open day itself counts on later dates up to today is covered by lib/admin/metrics.test.ts;
   -- here "later" is in the future, which an open day can't reach yet)
-  perform test.ok(exists (select 1 from jsonb_array_elements(public.admin_facts(outlet, current_date - 1, current_date - 1, ses)->'days') x
+  perform test.ok(exists (select 1 from jsonb_array_elements(public.admin_facts(outlet, today - 1, today - 1, ses)->'days') x
                           where x->>'id' = d->>'id') = false, 'a day opened today is not part of yesterday');
-  f := public.admin_facts(outlet, current_date, current_date, ses);
+  f := public.admin_facts(outlet, today, today, ses);
   perform test.ok(not exists (select 1 from jsonb_array_elements(f->'orders') x where x->>0 = o->>'id'),
                   'and it does not show on the opening date');
   perform public.pos_add_cash_movement(ses, 'in', 5000, 'Change top-up');
-  f := public.admin_facts(outlet, current_date, current_date, ses);
+  f := public.admin_facts(outlet, today, today, ses);
   perform test.ok(jsonb_array_length(f->'movements'->-1) = 4, 'cash movements carry their time');
 end $$;
 reset role;
