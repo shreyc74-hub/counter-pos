@@ -190,7 +190,7 @@ export class SupabaseAdminStore implements AdminStore {
       days: Facts["days"];
       orders: OrderRow[];
       expenses: [string, string, number, "cash" | "upi", number][];
-      movements: [string, "in" | "out", number][];
+      movements: [string, "in" | "out", number, number?][];
       stockOuts: [string, number][];
     }>("admin_facts", { p_outlet: outletId, p_from: from, p_to: to });
     return {
@@ -211,7 +211,7 @@ export class SupabaseAdminStore implements AdminStore {
         lines: (o[12] ?? []).map((l) => ({ refId: l[0], kind: l[1], qty: l[2], total: l[3], cost: l[4] })),
       })),
       expenses: r.expenses.map((e) => ({ dayId: e[0], category: e[1], amount: e[2], method: e[3], at: e[4] * 1000 })),
-      movements: r.movements.map((m) => ({ dayId: m[0], direction: m[1], amount: m[2] })),
+      movements: r.movements.map((m) => ({ dayId: m[0], direction: m[1], amount: m[2], at: m[3] != null ? m[3] * 1000 : undefined })),
       stockOuts: r.stockOuts.map((s) => ({ refId: s[0], at: s[1] * 1000 })),
     };
   }

@@ -109,6 +109,8 @@ export interface MovementFact {
   dayId: string;
   direction: "in" | "out";
   amount: Paise;
+  /** Epoch milliseconds (missing from servers before migration 7). */
+  at?: number;
 }
 
 export interface StockOutFact {

@@ -4,7 +4,7 @@ import { readDemoCounterState } from "@/lib/data/demoStore";
 import type { Outlet } from "@/lib/domain/types";
 import { uuid } from "@/lib/uuid";
 import { generateDemoHistory } from "./demoHistory";
-import { todayIst } from "./metrics";
+import { inRange, todayIst } from "./metrics";
 import type { AdminMenu, AdminStore, Facts, OrderFact, PricePoint } from "./types";
 
 const PRICES_KEY = "cpos.demo.prices.v1";
@@ -131,14 +131,7 @@ export class DemoAdminStore implements AdminStore {
       movements: [...h.movements, ...local.movements],
       stockOuts: [...h.stockOuts, ...local.stockOuts],
     };
-    const dayIds = new Set(all.days.filter((d) => d.date >= from && d.date <= to).map((d) => d.id));
-    return {
-      days: all.days.filter((d) => dayIds.has(d.id)),
-      orders: all.orders.filter((o) => dayIds.has(o.dayId)),
-      expenses: all.expenses.filter((e) => dayIds.has(e.dayId)),
-      movements: all.movements.filter((m) => dayIds.has(m.dayId)),
-      stockOuts: all.stockOuts,
-    };
+    return inRange(all, from, to);
   }
 
   private mutate(fn: (m: AdminMenu) => string): string {
@@ -222,7 +215,7 @@ function counterFacts(s: KV | null): Facts {
       }),
     ),
     expenses: st.expenses.map((e) => ({ dayId: e.daySessionId, category: e.category, amount: e.amountPaise, method: e.method, at: Date.parse(e.createdAt) })),
-    movements: st.movements.map((m) => ({ dayId: m.daySessionId, direction: m.direction, amount: m.amountPaise })),
+    movements: st.movements.map((m) => ({ dayId: m.daySessionId, direction: m.direction, amount: m.amountPaise, at: Date.parse(m.createdAt) })),
     stockOuts: [],
   };
 }

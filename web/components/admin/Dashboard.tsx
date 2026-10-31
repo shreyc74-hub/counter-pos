@@ -270,7 +270,7 @@ export function Dashboard({ store, outletId, menu }: { store: AdminStore; outlet
 }
 
 function computeView(facts: Facts, from: string, to: string, len: number, menu: AdminMenu | null, untilMinutes?: number) {
-  const cur = inRange(facts, from, to, to === todayIst());
+  const cur = inRange(facts, from, to);
   // The upsell to watch: drinks if the menu has them, otherwise snacks (spring rolls, fries;
   // some are listed under "New Entries").
   const has = (n: string) => !!menu?.categories.some((c) => c.active && c.name.toLowerCase() === n.toLowerCase());

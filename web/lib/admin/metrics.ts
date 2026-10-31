@@ -33,21 +33,30 @@ export function weekday(date: string): number {
   return d === 0 ? 7 : d;
 }
 
+/** The last date a day covers: the date it was closed, or today while it is still open. */
+function lastDate(d: DayFact, today: string): string {
+  return d.closedAt ? istDate(Date.parse(d.closedAt)) : today;
+}
+
 /**
- * Facts for days whose business date is in [from, to]. With includeOpen, a day that is
- * still open counts too even if it was opened on an earlier date (e.g. never closed
- * last night), so "Today" never hides sales that are happening now.
+ * Facts for the dates [from, to] (India time). Sales, expenses and cash movements count on
+ * the date they happened, so a day left open overnight (or for several days) still shows
+ * each sale on its own date. Days are the ones that were open at some point in the range.
  */
-export function inRange(f: Facts, from: string, to: string, includeOpen = false): Facts {
-  const dayIds = new Set(
-    f.days.filter((d) => (d.date >= from && d.date <= to) || (includeOpen && d.closedAt == null)).map((d) => d.id),
-  );
+export function inRange(f: Facts, from: string, to: string, today: string = todayIst()): Facts {
+  const days = f.days.filter((d) => d.date <= to && lastDate(d, today) >= from);
+  const dayIds = new Set(days.map((d) => d.id));
+  const within = (ms: number) => {
+    const x = istDate(ms);
+    return x >= from && x <= to;
+  };
   return {
-    days: f.days.filter((d) => dayIds.has(d.id)),
-    orders: f.orders.filter((o) => dayIds.has(o.dayId)),
-    expenses: f.expenses.filter((e) => dayIds.has(e.dayId)),
-    movements: f.movements.filter((m) => dayIds.has(m.dayId)),
-    stockOuts: f.stockOuts.filter((s) => istDate(s.at) >= from && istDate(s.at) <= to),
+    days,
+    orders: f.orders.filter((o) => within(o.at)),
+    expenses: f.expenses.filter((e) => within(e.at)),
+    // older data has no time on cash movements: those go by their day
+    movements: f.movements.filter((m) => (m.at != null ? within(m.at) : dayIds.has(m.dayId))),
+    stockOuts: f.stockOuts.filter((s) => within(s.at)),
   };
 }
 
@@ -139,12 +148,18 @@ export function byHour(orders: OrderFact[]): { orders: number[]; sales: Paise[] 
  * previous `weeks` weeks (only days that were actually open).
  */
 export function typicalByHour(f: Facts, date: string, weeks = 4): number[] | null {
-  const dates = Array.from({ length: weeks }, (_, i) => addDays(date, -7 * (i + 1)));
-  const days = f.days.filter((d) => dates.includes(d.date));
-  if (!days.length) return null;
-  const ids = new Set(days.map((d) => d.id));
-  const h = byHour(f.orders.filter((o) => ids.has(o.dayId))).orders;
-  return h.map((x) => x / days.length);
+  const dates = openDates(f, date, weeks);
+  if (!dates.length) return null;
+  const h = byHour(f.orders.filter((o) => dates.includes(istDate(o.at)))).orders;
+  return h.map((x) => x / dates.length);
+}
+
+/** The same weekday in the previous `weeks` weeks, keeping only dates the outlet was open. */
+function openDates(f: Facts, date: string, weeks: number): string[] {
+  const today = todayIst();
+  return Array.from({ length: weeks }, (_, i) => addDays(date, -7 * (i + 1))).filter((dt) =>
+    f.days.some((d) => d.date <= dt && lastDate(d, today) >= dt),
+  );
 }
 
 /** Minutes since midnight, India time. */
@@ -158,16 +173,14 @@ export function istMinutes(ms: number): number {
  * (so "today so far" is compared fairly with a usual day so far).
  */
 export function typicalSummary(f: Facts, date: string, weeks = 4, untilMinutes?: number): Summary | null {
-  const dates = Array.from({ length: weeks }, (_, i) => addDays(date, -7 * (i + 1)));
-  const days = f.days.filter((d) => dates.includes(d.date));
-  if (!days.length) return null;
-  const ids = new Set(days.map((d) => d.id));
-  const before = (ms: number) => untilMinutes == null || istMinutes(ms) <= untilMinutes;
+  const dates = openDates(f, date, weeks);
+  if (!dates.length) return null;
+  const on = (ms: number) => dates.includes(istDate(ms)) && (untilMinutes == null || istMinutes(ms) <= untilMinutes);
   const s = summarize({
-    orders: f.orders.filter((o) => ids.has(o.dayId) && before(o.at)),
-    expenses: f.expenses.filter((e) => ids.has(e.dayId) && before(e.at)),
+    orders: f.orders.filter((o) => on(o.at)),
+    expenses: f.expenses.filter((e) => on(e.at)),
   });
-  const n = days.length;
+  const n = dates.length;
   const avg = (x: number) => Math.round(x / n);
   return {
     ...s,

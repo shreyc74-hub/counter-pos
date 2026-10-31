@@ -101,12 +101,21 @@ describe("summarize", () => {
 });
 
 describe("ranges", () => {
-  it("can include a day left open from an earlier date", () => {
-    const f = { days: [day({ date: "2026-10-22", closedAt: null })], orders: [order({})], expenses: [], movements: [], stockOuts: [] };
-    expect(inRange(f, "2026-10-23", "2026-10-23").orders).toHaveLength(0);
-    expect(inRange(f, "2026-10-23", "2026-10-23", true).orders).toHaveLength(1);
-    const closed = { ...f, days: [day({ date: "2026-10-22", closedAt: "x" })] };
-    expect(inRange(closed, "2026-10-23", "2026-10-23", true).orders).toHaveLength(0);
+  it("counts sales on the date they happened, even in a day left open since an earlier date", () => {
+    const sale22 = order({ at: Date.parse("2026-10-22T19:30:00+05:30") });
+    const sale23 = order({ at: Date.parse("2026-10-23T13:00:00+05:30") });
+    const sale23late = order({ at: Date.parse("2026-10-23T23:50:00+05:30") }); // still the 23rd in India
+    const f = { days: [day({ date: "2026-10-22", closedAt: null })], orders: [sale22, sale23, sale23late], expenses: [], movements: [], stockOuts: [] };
+    const on23 = inRange(f, "2026-10-23", "2026-10-23", "2026-10-24");
+    expect(on23.orders.map((o) => o.id)).toEqual([sale23.id, sale23late.id]);
+    expect(on23.days).toHaveLength(1); // the day was open on the 23rd
+    expect(inRange(f, "2026-10-22", "2026-10-22", "2026-10-24").orders).toEqual([sale22]);
+  });
+
+  it("a day closed on the 22nd is not part of the 23rd", () => {
+    const f = { days: [day({ date: "2026-10-22", closedAt: "2026-10-22T17:00:00Z" })], orders: [order({})], expenses: [], movements: [], stockOuts: [] };
+    expect(inRange(f, "2026-10-23", "2026-10-23", "2026-10-24").days).toHaveLength(0);
+    expect(inRange(f, "2026-10-22", "2026-10-22", "2026-10-24").days).toHaveLength(1);
   });
 });
 
